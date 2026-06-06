@@ -1,0 +1,25 @@
+[Unit]
+Description=Webux Linux Management Panel
+Documentation=https://github.com/brendan4linux/webux
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/webux
+Restart=on-failure
+RestartSec=5s
+
+# Data and config
+Environment=WEBUX_DATA_DIR=/var/lib/webux
+Environment=WEBUX_CONFIG=/etc/webux/config.yaml
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=webux
+
+[Install]
+WantedBy=multi-user.target

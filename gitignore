@@ -1,0 +1,49 @@
+# ── Build outputs ─────────────────────────────────────────────────────────
+/build/
+/web/dist/
+/cmd/webux/dist/
+
+# ── Node / Frontend ────────────────────────────────────────────────────────
+/web/node_modules/
+/web/.vite/
+
+# ── Runtime data ──────────────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+/var/
+/tmp/
+
+# ── TLS certificates (auto-generated, contain private keys) ───────────────
+*.crt
+*.key
+*.pem
+# Exception: keep example/template cert configs if you add them
+!scripts/*.example.pem
+
+# ── Editor / OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Go ────────────────────────────────────────────────────────────────────
+# go.sum IS committed — it pins exact dependency hashes for reproducible builds
+# go.mod IS committed — defines the module
+
+# ── Air (live reload dev tool) ────────────────────────────────────────────
+.air.toml
+tmp/
+
+# ── Test artifacts ────────────────────────────────────────────────────────
+*.test
+coverage.out
+coverage.html
+
+# ── Secrets / local config overrides ─────────────────────────────────────
+config.local.yaml
+.env
+.env.local

@@ -1,0 +1,12 @@
+# /etc/pam.d/webux
+# PAM configuration for Webux Linux Management Panel
+#
+# This uses the same auth stack as the system login.
+# Edit to add 2FA, LDAP, or other PAM modules.
+
+auth       required     pam_unix.so
+auth       optional     pam_sss.so          # uncomment for SSSD/LDAP
+# auth    required     pam_google_authenticator.so  # uncomment for TOTP 2FA
+
+account    required     pam_unix.so
+account    optional     pam_sss.so

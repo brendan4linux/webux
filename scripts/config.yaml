@@ -1,0 +1,22 @@
+# Webux configuration
+# All settings can also be set via environment variables (WEBUX_*)
+
+server:
+  host: "0.0.0.0"
+  port: 8989
+
+data_dir: "/var/lib/webux"
+
+# TLS — Webux always runs HTTPS.
+# Leave blank to use an auto-generated self-signed certificate (stored in data_dir).
+# Provide paths to use your own certificate (Let's Encrypt, internal CA, etc.)
+tls_cert_file: ""   # e.g. /etc/letsencrypt/live/myserver.example.com/fullchain.pem
+tls_key_file:  ""   # e.g. /etc/letsencrypt/live/myserver.example.com/privkey.pem
+
+auth:
+  bypass_token: ""  # SSO bypass — leave blank to disable
+  jwt_secret:   ""  # Leave blank — auto-generated on first run
+  disabled:     false
+
+log:
+  level: "info"   # debug | info | warn | error

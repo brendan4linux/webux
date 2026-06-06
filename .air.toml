@@ -1,0 +1,22 @@
+root = "."
+tmp_dir = ".air"
+
+[build]
+  cmd = "go build -o .air/webux ./cmd/webux"
+  bin = ".air/webux"
+  args_bin = ["--config", "/dev/null"]
+  include_ext = ["go"]
+  exclude_dir = ["web", ".air", "build"]
+  delay = 500
+
+[log]
+  time = false
+
+[color]
+  main = "yellow"
+  watcher = "cyan"
+  build = "green"
+  runner = "magenta"
+
+[misc]
+  clean_on_exit = true
