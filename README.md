@@ -20,6 +20,39 @@ One binary. No agents. No containers. Works on any distro.
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="480"><br>
+      <sub><b>Dashboard</b> — live CPU, memory, disk and uptime</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/services.png" alt="Services" width="480"><br>
+      <sub><b>Services</b> — systemd unit management</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/processes.png" alt="Processes" width="480"><br>
+      <sub><b>Processes</b> — live /proc scanner</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/interfaces.png" alt="Network Interfaces" width="480"><br>
+      <sub><b>Network Interfaces</b> — live bandwidth sparklines</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/screenshots/migrationtemplate.png" alt="Migration Template" width="480"><br>
+      <sub><b>Migration Template</b> — full server snapshot export</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## What is Webux?
 
 Webux is a self-hosted Linux server management panel that runs as a **single static binary** with an embedded web UI, embedded SQLite database, and no external runtime dependencies. Install it in seconds on any Linux server — from RHEL 6 to the latest Arch — and get a full management panel immediately.
@@ -100,7 +133,7 @@ Webux issues a real JWT session and redirects to the dashboard. The token can al
 
 ```bash
 # Build from source
-git clone https://github.com/brendan4linux/webux
+git clone https://github.com/yourusername/webux
 cd webux
 go mod tidy
 make build-full          # CGO enabled — supports all password hash types
@@ -313,7 +346,7 @@ Cross-compiled architectures: **amd64, arm64, armv7, 386**
 
 ```bash
 # Download and run (installs binary + detects init system automatically)
-curl -fsSL https://github.com/brendan4linux/webux/releases/latest/download/install.sh | sudo sh
+curl -fsSL https://github.com/yourusername/webux/releases/latest/download/install.sh | sudo sh
 
 # Or with a specific version
 sudo sh install.sh --version 1.0.0
