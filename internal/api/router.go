@@ -77,6 +77,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Get("/processes", procH.List)
 		r.Post("/processes/{pid}/kill", procH.Kill)
 
+		// Health checks
+		healthH := handlers.NewHealthHandler(cfg.DB)
+		r.Get("/health", healthH.Run)
+		r.Get("/health/detail", healthH.Detail)
+		r.Get("/health/checks", healthH.GetChecks)
+		r.Put("/health/checks", healthH.SaveChecks)
+		r.Delete("/health/checks", healthH.ResetChecks)
+
 		// Users & groups
 		usersH := handlers.NewUsersHandler(learnStore)
 		r.Get("/users", usersH.ListUsers)

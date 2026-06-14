@@ -133,7 +133,7 @@ Webux issues a real JWT session and redirects to the dashboard. The token can al
 
 ```bash
 # Build from source
-git clone https://github.com/yourusername/webux
+git clone https://github.com/brendan4linux/webux
 cd webux
 go mod tidy
 make build-full          # CGO enabled — supports all password hash types
@@ -346,7 +346,7 @@ Cross-compiled architectures: **amd64, arm64, armv7, 386**
 
 ```bash
 # Download and run (installs binary + detects init system automatically)
-curl -fsSL https://github.com/yourusername/webux/releases/latest/download/install.sh | sudo sh
+curl -fsSL https://github.com/brendan4linux/webux/releases/latest/download/install.sh | sudo sh
 
 # Or with a specific version
 sudo sh install.sh --version 1.0.0
