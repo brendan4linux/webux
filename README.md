@@ -44,7 +44,21 @@ One binary. No agents. No containers. Works on any distro.
     </td>
   </tr>
   <tr>
-    <td align="center" colspan="2">
+    <td align="center">
+      <img src="docs/screenshots/terminal.png" alt="Terminal" width="480"><br>
+      <sub><b>Terminal</b> — full PTY browser terminal with quick commands</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/containers.png" alt="Containers" width="480"><br>
+      <sub><b>Containers</b> — Docker and Podman management</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/webservers.png" alt="Webservers" width="480"><br>
+      <sub><b>Webservers</b> — Nginx, Apache, Caddy status and config</sub>
+    </td>
+    <td align="center">
       <img src="docs/screenshots/migrationtemplate.png" alt="Migration Template" width="480"><br>
       <sub><b>Migration Template</b> — full server snapshot export</sub>
     </td>
@@ -59,6 +73,8 @@ Webux is a self-hosted Linux server management panel that runs as a **single sta
 
 It is opinionated about being lightweight: no Docker required to run it, no systemd mandatory, no cloud account, no telemetry, no license server. Just a binary.
 
+**Webux also teaches you Linux as you use it.** Every action — starting a service, extending a disk, running an Ansible playbook — emits the equivalent shell command to a Learn Mode drawer at the bottom of the page. A ▶ play button runs any command directly in the built-in terminal. It's a practical way to get comfortable with Linux administration without leaving the UI.
+
 ---
 
 ## Features
@@ -66,7 +82,8 @@ It is opinionated about being lightweight: no Docker required to run it, no syst
 ### System
 | Feature | Description |
 |---------|-------------|
-| **Dashboard** | Live CPU, memory, disk, load average, uptime — updates in real time over WebSocket |
+| **Dashboard** | Live CPU, memory, disk, load average, uptime — updates in real time over WebSocket. Includes a **health check panel** showing the server's current status at a glance |
+| **Health Checks** | Six configurable pass/fail checks run on every dashboard load: kernel age, failed services, swap pressure, disk usage, CPU load, and pending security updates. Each check expands to show detail output. Fully customisable — add, edit, or remove checks via the Settings page using any shell command |
 | **Services** | systemd/OpenRC unit management — start, stop, enable, disable, view logs. Shows all units including disabled ones |
 | **Processes** | Live `/proc` scanner — CPU%, memory, PID, user, full command line |
 | **Disks** | Block device tree, partition layout, mount usage bars. LVM-aware: shows Volume Groups, free space, and offers **online filesystem extension** (ext3/4, XFS, Btrfs) when VG free space is available — no reboot required |
@@ -93,7 +110,7 @@ It is opinionated about being lightweight: no Docker required to run it, no syst
 | Feature | Description |
 |---------|-------------|
 | **Ansible** | Scans a configurable playbook directory. Parses declared variables (`vars:`, `vars_prompt:`) and renders input boxes. Runs playbooks with live SSE output streaming. If Ansible is not installed, offers one-click install via the native package manager |
-| **Puppet** | Reads puppet.conf, views facts, catalog status, last run report |
+| **Puppet** | Reads puppet.conf, views facts, catalog status, last run report. Supports AIO (`/opt/puppetlabs/bin/puppet`) and distro package installs |
 
 ### Tools
 | Feature | Description |
@@ -102,6 +119,23 @@ It is opinionated about being lightweight: no Docker required to run it, no syst
 | **Terminal** | Full PTY terminal in the browser (xterm.js). Spawns the user's login shell. Quick-command chips configurable in settings. **Play button** in Learn Mode runs any CLI-equivalent command directly in the terminal |
 | **AI Assistant** | Ollama-first (self-hosted, no API key needed). Includes a setup wizard, model browser with RAM requirements, and one-click model pull with progress streaming. Also supports OpenAI, Anthropic, and any OpenAI-compatible endpoint. Every chat message automatically injects live system context (CPU, RAM, failed services, open ports) |
 | **Learn Mode** | Every action emits its CLI shell equivalent to a collapsible pane at the bottom of every page. Each command has a **▶ play button** that runs it in the terminal — navigate to the terminal automatically if needed |
+
+---
+
+## Health Checks
+
+The dashboard includes a real-time health panel that runs six checks on every load:
+
+| Check | Pass condition | Detail on expand |
+|-------|---------------|------------------|
+| Kernel / uptime | Uptime under 90 days | Shows uptime, kernel version |
+| System services | No failed systemd units | Lists any failed unit names |
+| Memory / swap | Swap usage under 75% | Shows RAM and swap used/total |
+| Disk usage | All real filesystems under 80% | Lists over-threshold mounts |
+| CPU load | 15-min load under CPU core count | Shows load avg and core count |
+| Security updates | No pending security patches | Runs distro-appropriate check |
+
+Checks are fully configurable in **Settings → Health Checks**. Each check is a shell command where exit code 0 = pass and non-zero = fail. Add your own checks for anything that matters on your servers — a running daemon, a reachable endpoint, a file's existence, a certificate's expiry date.
 
 ---
 
@@ -140,7 +174,7 @@ make build-full          # CGO enabled — supports all password hash types
 sudo WEBUX_DATA_DIR=/var/lib/webux ./build/webux-full
 
 # Open — login with your Linux username and password
-open http://localhost:8989
+open https://localhost:8989
 ```
 
 ### Install as a service
@@ -209,11 +243,11 @@ internal/
     pam.go            # PAM via CGO (-tags pam)
     pam_stub.go       # Shadow fallback (no CGO)
     crypt_cgo.go      # crypt(3) via libxcrypt (yescrypt, SHA-512, etc.)
-    crypt_stub.go     # bcrypt-only fallback
+    crypt_stub.go     # Pure Go SHA-512/256/MD5 crypt for static builds
   config/config.go    # YAML + environment variable config
   db/
     db.go             # SQLite open + migration runner
-    migrations/       # 001_init … 006_auth SQL files
+    migrations/       # 001_init … 007_health SQL files
   learn/              # CLI echo ring buffer + WebSocket broadcast
   system/
     detect.go         # Distro/init system detection
@@ -231,6 +265,7 @@ internal/
     files/            # File browser + editor
     cron/             # Crontab parser + editor
     disks/            # lsblk, df, LVM (pvs/vgs/lvs), filesystem resize
+    health/           # Configurable pass/fail system checks
     ansible/          # Playbook scanner, variable extractor, runner
     ai/               # Ollama + OpenAI-compatible chat client
   ws/hub.go           # WebSocket hub — real-time metrics, CLI echoes
@@ -241,7 +276,8 @@ web/src/
   components/
     Sidebar.svelte    # Navigation
     Topbar.svelte     # Hostname, live indicator, logout
-    CLIEchoPane.svelte # Learn mode — fixed bottom drawer with ▶ play buttons
+    HealthChecks.svelte # Dashboard health panel with expandable checks
+    CLIEchoPane.svelte  # Learn mode — fixed bottom drawer with ▶ play buttons
   lib/
     api.ts            # Typed fetch wrapper
     ws.ts             # WebSocket store
@@ -278,6 +314,9 @@ Runtime: **one binary + one SQLite file**. The binary is ~20–30 MB depending o
 listen_addr: ":8989"          # Default port — change here or in Settings UI
 data_dir: "/var/lib/webux"    # SQLite DB and other runtime data
 
+tls_cert_file: ""             # Leave blank for auto-generated self-signed cert
+tls_key_file:  ""             # Or set paths to your own cert/key (Let's Encrypt etc.)
+
 log:
   level: "info"               # debug | info | warn | error
 
@@ -303,6 +342,7 @@ Settings editable in the UI (persisted to SQLite):
 - SSO bypass token
 - AI provider (Ollama URL, model, API keys)
 - Terminal shell override and quick commands
+- Health check definitions (shell commands, labels, enable/disable)
 
 ---
 
@@ -372,6 +412,9 @@ dpkg -i webux_1.0.0_amd64.deb
 # RHEL / Fedora / CentOS
 rpm -i webux-1.0.0-1.x86_64.rpm
 
+# Arch / Manjaro / CachyOS
+pacman -U webux-1.0.0-1-x86_64.pkg.tar.zst
+
 # Universal tarball
 tar xzf webux-1.0.0-linux-amd64.tar.gz
 sudo sh usr/local/share/webux/install.sh
@@ -395,13 +438,14 @@ account    optional     pam_sss.so
 
 Install: `sudo cp scripts/webux.pam /etc/pam.d/webux`
 
-Without the PAM build tag, Webux reads `/etc/shadow` directly using `crypt(3)` via libxcrypt — supporting yescrypt (`$y$`), SHA-512 (`$6$`), SHA-256 (`$5$`), and bcrypt (`$2b$`).
+Without the PAM build tag, Webux reads `/etc/shadow` directly using `crypt(3)` — supporting yescrypt (`$y$`), SHA-512 (`$6$`), SHA-256 (`$5$`), and bcrypt (`$2b$`). SHA-512 and SHA-256 are implemented in pure Go so static cross-compiled binaries work without libxcrypt. Yescrypt (Arch, Ubuntu 24+) requires the CGO build.
 
 ---
 
 ## Security notes
 
 - Webux requires root (or equivalent) to access `/etc/shadow`, manage services, run LVM commands, and read `/proc`. Run it as root or with appropriate capabilities.
+- Webux always runs HTTPS. A self-signed ECDSA certificate is auto-generated on first run (stored in `data_dir`, valid 2 years, includes all interface IPs as SANs). Set `tls_cert_file` and `tls_key_file` in config to use your own certificate.
 - The JWT secret is stored in SQLite. Back up `/var/lib/webux/webux.db` to preserve sessions across reinstalls.
 - The SSO bypass token grants full admin access — treat it like a root password.
 - All API endpoints (except `/auth/login` and static assets) require a valid JWT. WebSocket connections are also gated.
