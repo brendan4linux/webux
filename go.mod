@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/ncruces/go-sqlite3 v0.21.3
+	github.com/openwall/yescrypt-go v1.0.0
 	golang.org/x/crypto v0.31.0
 	gopkg.in/yaml.v3 v3.0.1
 )
