@@ -6,9 +6,7 @@
   let username = $state('');
 
   $effect(() => {
-    const unsub = wsStore.subscribe(evt => {
-      if (evt) wsConnected = true;
-    });
+    const unsub = wsStore.connected.subscribe(v => { wsConnected = v; });
     return unsub;
   });
 

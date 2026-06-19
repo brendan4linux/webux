@@ -16,6 +16,8 @@ export interface WSEvent {
 
 function createWSStore() {
   const { subscribe, set } = writable<WSEvent | null>(null);
+  const { subscribe: subConnected, set: setConnected } = writable(false);
+
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
@@ -25,11 +27,14 @@ function createWSStore() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws`);
 
+    ws.onopen = () => setConnected(true);
+
     ws.onmessage = (e) => {
       try { set(JSON.parse(e.data)); } catch {}
     };
 
     ws.onclose = () => {
+      setConnected(false);
       if (!destroyed) reconnectTimer = setTimeout(connect, 3000);
     };
 
@@ -40,6 +45,7 @@ function createWSStore() {
 
   return {
     subscribe,
+    connected: { subscribe: subConnected },
     destroy() {
       destroyed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);

@@ -10,7 +10,6 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/ncruces/go-sqlite3 v0.21.3
-	github.com/openwall/yescrypt-go v1.0.0
 	golang.org/x/crypto v0.31.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -21,6 +20,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
+	github.com/openwall/yescrypt-go v1.0.0
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	github.com/tetratelabs/wazero v1.8.2 // indirect
 	golang.org/x/net v0.21.0 // indirect

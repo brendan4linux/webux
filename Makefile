@@ -67,12 +67,9 @@ build-postgres: web
 
 ## build-full: Build with all DB drivers (CGO enabled for crypt/shadow auth)
 build-full: web
-	@echo "→ Building $(BINARY) with all DB drivers"
-	@mkdir -p $(OUT_DIR)
-	CGO_ENABLED=1 go build -tags "mysql postgres" \
+	CGO_ENABLED=0 go build -tags "mysql postgres" \
 		-ldflags "$(LDFLAGS)" -trimpath \
-		-o $(OUT_DIR)/$(BINARY)-full $(CMD_DIR)
-	@echo "✓ $(OUT_DIR)/$(BINARY)-full"
+		-o $(OUT_DIR)/webux-full $(CMD_DIR)
 
 ## build-pam: Build with PAM auth + all DB drivers (requires CGO + libpam-dev)
 ## Debian/Ubuntu: apt install libpam0g-dev
@@ -132,11 +129,9 @@ release: release-amd64 release-arm64 release-armv7 release-386
 
 ## release-full: Cross-compile with all DB drivers for all arches
 release-full:
-	@$(MAKE) release TAGS="mysql postgres"
-	@for f in $(OUT_DIR)/release/$(BINARY)-linux-*; do \
-		mv "$$f" "$${f%-linux-*}-full-linux-$${f##*-linux-}"; \
-	done
-	@echo "✓ Full-featured release binaries built"
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "mysql postgres" \
+		-ldflags "$(LDFLAGS)" -trimpath \
+		-o $(OUT_DIR)/release/webux-full-linux-amd64 $(CMD_DIR)
 
 ## checksums: Generate SHA256 checksums for all release binaries
 checksums:

@@ -106,11 +106,13 @@ func (h *Hub) Broadcast(eventType EventType, payload interface{}) {
 
 // ServeWS upgrades an HTTP connection and registers the client.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		slog.Error("ws upgrade", "err", err)
-		return
-	}
+    slog.Info("ws upgrade attempt", "remote", r.RemoteAddr, "origin", r.Header.Get("Origin"), "upgrade", r.Header.Get("Upgrade"), "cookie", r.Header.Get("Cookie") != "")
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        slog.Error("ws upgrade failed", "err", err, "remote", r.RemoteAddr)
+        return
+    }
+    slog.Info("ws client connected", "remote", r.RemoteAddr)
 
 	c := &client{conn: conn, send: make(chan []byte, 64)}
 	h.reg <- c

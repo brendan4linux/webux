@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
-
+	"strings"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -39,7 +39,17 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Compress(5))
+	r.Use(func(next http.Handler) http.Handler {
+    compress := middleware.Compress(5)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/ws") ||
+				strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			compress(next).ServeHTTP(w, r)
+		})
+	})
 
 	learnStore := learn.NewStore(cfg.DB)
 	learnStore.Subscribe(func(e learn.EchoEntry) {

@@ -1,0 +1,21 @@
+Replace this in Topbar.svelte:
+
+  let wsConnected = $state(false);
+
+  $effect(() => {
+    const unsub = wsStore.subscribe(evt => {
+      if (evt) wsConnected = true;
+    });
+    return unsub;
+  });
+
+With this:
+
+  const wsConnected = $derived($state(false) || true) // placeholder
+  // Actually use:
+  import { wsStore } from '$lib/ws';
+  let wsConnected = $state(false);
+  $effect(() => {
+    const unsub = wsStore.connected.subscribe(v => { wsConnected = v; });
+    return unsub;
+  });

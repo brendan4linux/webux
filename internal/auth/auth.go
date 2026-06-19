@@ -4,7 +4,6 @@
 package auth
 
 import (
-	"bufio"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,11 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ── JWT ──────────────────────────────────────────────────────────────────
@@ -210,64 +207,6 @@ func BuildInfo() string { return buildInfo() }
 
 // PAMAvailable reports whether PAM support is compiled in.
 func PAMAvailable() bool { return pamAvailable() }
-
-// ── Shadow file fallback ──────────────────────────────────────────────────
-
-// authenticateShadow verifies username/password against /etc/shadow.
-// Uses the system crypt(3) library via CGO to handle all hash types:
-// $y$ (yescrypt), $6$ (SHA-512), $5$ (SHA-256), $2b$ (bcrypt), etc.
-func authenticateShadow(username, password string) error {
-	hash, err := shadowHash(username)
-	if err != nil {
-		return fmt.Errorf("authentication failed")
-	}
-	return verifyCrypt(password, hash)
-}
-
-func shadowHash(username string) (string, error) {
-	f, err := os.Open("/etc/shadow")
-	if err != nil {
-		return "", fmt.Errorf("cannot read /etc/shadow: %w", err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Split(scanner.Text(), ":")
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[0] == username {
-			hash := fields[1]
-			if hash == "" || hash == "!" || hash == "*" || hash == "!!" {
-				return "", fmt.Errorf("account locked or no password set")
-			}
-			return hash, nil
-		}
-	}
-	return "", fmt.Errorf("user not found")
-}
-
-// verifyCrypt verifies a password against a crypt(3) hash.
-// Pure Go handles: $6$ SHA-512, $5$ SHA-256, $1$ MD5, $2* bcrypt.
-// CGO build also handles: $y$ yescrypt (Arch, Ubuntu 24+, Debian 12+).
-func verifyCrypt(password, hash string) error {
-	// bcrypt — pure Go via golang.org/x/crypto
-	if strings.HasPrefix(hash, "$2") {
-		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	}
-	result, err := cryptPassword(password, hash)
-	if err != nil {
-		if strings.HasPrefix(hash, "$y$") {
-			return fmt.Errorf("yescrypt ($y$) requires CGO build — rebuild with: CGO_ENABLED=1 make build-full")
-		}
-		return fmt.Errorf("authentication failed")
-	}
-	if !hmac.Equal([]byte(result), []byte(hash)) {
-		return fmt.Errorf("authentication failed")
-	}
-	return nil
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
