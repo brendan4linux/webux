@@ -16,7 +16,27 @@
   let configSaving = $state(false);
   let configError = $state('');
   let testResult = $state('');
-  let tab = $state<'overview'|'config'|'sites'>('overview');
+  let tab = $state<'sites'|'config'|'security'>('sites');
+
+  interface SvcCheck { id: string; label: string; pass: boolean; detail: string; fix: string; severity: string; }
+  let secChecks = $state<SvcCheck[]>([]);
+  let secLoading = $state(false);
+  let secError = $state('');
+
+  async function loadSecurity(type: string) {
+    secLoading = true; secError = '';
+    try {
+      const res = await fetch(`/api/webservers/security?type=${encodeURIComponent(type)}`);
+      if (!res.ok) throw new Error(await res.text());
+      const d = await res.json();
+      secChecks = d.checks ?? [];
+    } catch(e: any) { secError = e.message; }
+    finally { secLoading = false; }
+  }
+
+  $effect(() => {
+    if (tab === 'security' && activeServer) loadSecurity(activeServer);
+  });
 
   async function load() {
     loading = true; error = '';
@@ -140,6 +160,9 @@
         <button class="tab-btn" class:active={tab==='config'} onclick={() => tab='config'}>
           Config editor
         </button>
+        <button class="tab-btn" class:active={tab==='security'} onclick={() => tab='security'}>
+          🔒 Security
+        </button>
       </div>
 
       {#if tab === 'sites'}
@@ -173,6 +196,29 @@
             </tbody>
           </table>
         </div>
+
+      {:else if tab === 'security'}
+        {#if secError}<div class="alert alert-error">{secError}</div>
+        {:else if secLoading}
+          <div class="card" style="padding:1.5rem;text-align:center;color:var(--text-tertiary)">Scanning config…</div>
+        {:else if secChecks.length === 0}
+          <div class="card" style="padding:1.5rem;text-align:center;color:var(--text-tertiary)">No checks available</div>
+        {:else}
+          <div class="sec-list card" style="padding:0">
+            {#each secChecks as c (c.id)}
+              <div class="sec-row" class:sec-pass={c.pass} class:sec-fail={!c.pass}>
+                <span class="sec-icon">{c.pass ? '✓' : '✗'}</span>
+                <div class="sec-body">
+                  <div class="sec-label">{c.label}
+                    <span class="badge badge-{c.severity === 'high' ? 'red' : c.severity === 'medium' ? 'yellow' : 'gray'}" style="margin-left:0.375rem;font-size:0.65rem">{c.severity}</span>
+                  </div>
+                  <div class="sec-detail">{c.pass ? c.detail : c.fix}</div>
+                  {#if !c.pass && c.detail}<div class="sec-found">Found: {c.detail}</div>{/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
       {:else if tab === 'config'}
         {#if configError}<div class="alert alert-error" style="margin-bottom:0.5rem">{configError}</div>{/if}
@@ -208,4 +254,14 @@
 .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:500; }
 .config-editor { width:100%; padding:0.75rem; background:var(--bg-base); border:1px solid var(--border-default); border-radius:var(--r-md); color:var(--text-primary); font-size:0.75rem; line-height:1.5; resize:vertical; min-height:300px; }
 .config-editor:focus { outline:none; border-color:var(--accent); }
+.sec-row { display:flex; align-items:flex-start; gap:0.75rem; padding:0.75rem 1rem; border-bottom:1px solid var(--border-subtle); }
+.sec-row:last-child { border-bottom:none; }
+.sec-icon { font-size:0.85rem; font-weight:700; width:16px; flex-shrink:0; margin-top:0.1rem; }
+.sec-pass .sec-icon { color:var(--accent); }
+.sec-fail .sec-icon { color:#f87171; }
+.sec-body { flex:1; min-width:0; }
+.sec-label { font-size:0.82rem; font-weight:500; color:var(--text-primary); display:flex; align-items:center; flex-wrap:wrap; gap:0.25rem; }
+.sec-fail .sec-label { color:#f87171; }
+.sec-detail { font-size:0.74rem; color:var(--text-secondary); margin-top:0.2rem; }
+.sec-found { font-size:0.7rem; color:var(--text-tertiary); margin-top:0.15rem; font-style:italic; }
 </style>

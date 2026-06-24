@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -20,6 +21,7 @@ import (
 	"github.com/brendan4linux/webux/internal/config"
 	"github.com/brendan4linux/webux/internal/db"
 	"github.com/brendan4linux/webux/internal/system"
+	"github.com/brendan4linux/webux/internal/system/hardening"
 	webuxTLS "github.com/brendan4linux/webux/internal/tlsutil"
 	"github.com/brendan4linux/webux/internal/ws"
 )
@@ -69,6 +71,19 @@ func main() {
 		slog.Error("migration failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Run security hardening checks in the background at startup
+	go func() {
+		score := hardening.RunAll()
+		b, err := json.Marshal(score)
+		if err == nil {
+			database.Exec(
+				`INSERT INTO webux_settings(key, value) VALUES(?, ?)
+				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+				"hardening.results", string(b),
+			)
+		}
+	}()
 
 	// Ensure JWT secret exists — generate if missing
 	jwtSecret := cfg.Auth.JWTSecret

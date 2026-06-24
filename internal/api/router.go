@@ -95,6 +95,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Put("/health/checks", healthH.SaveChecks)
 		r.Delete("/health/checks", healthH.ResetChecks)
 
+		// Security hardening score
+		hardeningH := handlers.NewHardeningHandler(cfg.DB)
+		r.Get("/hardening", hardeningH.Get)
+		r.Post("/hardening/refresh", hardeningH.Refresh)
+
 		// Users & groups
 		usersH := handlers.NewUsersHandler(learnStore)
 		r.Get("/users", usersH.ListUsers)
@@ -144,6 +149,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		// Databases
 		dbH := handlers.NewDatabasesHandler(learnStore)
 		r.Get("/databases", dbH.Detect)
+		r.Get("/databases/security", dbH.Security)
 		r.Post("/databases/connect", dbH.Connect)
 		r.Get("/databases/{connID}/databases", dbH.ListDatabases)
 		r.Get("/databases/{connID}/tables", dbH.ListTables)
@@ -153,6 +159,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		// Webservers
 		wsrvH := handlers.NewWebserversHandler(learnStore)
 		r.Get("/webservers", wsrvH.List)
+		r.Get("/webservers/security", wsrvH.Security)
 		r.Get("/webservers/{type}/config", wsrvH.GetConfig)
 		r.Put("/webservers/{type}/config", wsrvH.SaveConfig)
 		r.Post("/webservers/{type}/test", wsrvH.TestConfig)
