@@ -139,6 +139,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Get("/containers/{id}/logs", ctrH.Logs)
 		r.Get("/containers/{id}/stats", ctrH.Stats)
 		r.Get("/containers/images", ctrH.ListImages)
+		r.Post("/api/containers/run", ctrH.Run)
 
 		// Databases
 		dbH := handlers.NewDatabasesHandler(learnStore)
@@ -218,6 +219,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		disksH := handlers.NewDisksHandler(learnStore)
 		r.Get("/disks", disksH.Summary)
 		r.Post("/disks/extend", disksH.Extend)
+		r.Get("/disks/usage", disksH.DirUsage)
+		r.Get("/disks/drilldown", disksH.DirDrillDown)
 
 		// Ansible
 		ansibleH := handlers.NewAnsibleHandler(learnStore, cfg.DB)

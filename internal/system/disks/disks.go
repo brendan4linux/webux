@@ -311,7 +311,7 @@ func countParts(d BlockDevice) int {
 // ── df ────────────────────────────────────────────────────────────────────
 
 func listMounts() []MountUsage {
-	out, err := exec.Command("df", "-P", "-B1",
+	out, err := exec.Command("df", "-B1",
 		"--output=source,fstype,size,used,avail,pcent,target").Output()
 	if err != nil {
 		return nil

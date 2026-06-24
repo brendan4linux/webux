@@ -33,6 +33,55 @@
   let loading = $state(true);
   let error = $state('');
 
+  // ── Directory usage drill-down ───────────────────────────────────
+  interface DirUsage {
+    path: string; bytes: number; human: string; size_pct: number;
+  }
+  let usageMount = $state('');
+  let usageBreadcrumb: string[] = $state([]);
+  let usageEntries: DirUsage[] = $state([]);
+  let usageLoading = $state(false);
+  let usageError = $state('');
+
+  async function openUsage(mountpoint: string) {
+    if (usageMount === mountpoint) { closeUsage(); return; } // toggle off
+    usageMount = mountpoint;
+    usageBreadcrumb = [mountpoint];
+    await fetchUsage(mountpoint, mountpoint);
+  }
+
+  async function fetchUsage(mount: string, target: string) {
+    usageLoading = true; usageError = ''; usageEntries = [];
+    try {
+      const url = target === mount
+        ? `/api/disks/usage?mount=${encodeURIComponent(mount)}&top=20`
+        : `/api/disks/drilldown?mount=${encodeURIComponent(mount)}&path=${encodeURIComponent(target)}&top=20`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      usageEntries = data.entries ?? [];
+    } catch(e: any) { usageError = e.message; }
+    finally { usageLoading = false; }
+  }
+
+  async function drillInto(entry: DirUsage) {
+    usageBreadcrumb = [...usageBreadcrumb, entry.path];
+    await fetchUsage(usageMount, entry.path);
+  }
+
+  async function jumpTo(idx: number) {
+    usageBreadcrumb = usageBreadcrumb.slice(0, idx + 1);
+    await fetchUsage(usageMount, usageBreadcrumb[usageBreadcrumb.length - 1]);
+  }
+
+  function closeUsage() {
+    usageMount = ''; usageBreadcrumb = []; usageEntries = [];
+  }
+
+  const maxUsageBytes = $derived(
+    usageEntries.length > 0 ? Math.max(...usageEntries.map(e => e.bytes)) : 1
+  );
+
   // Extend modal
   let extendTarget: LogicalVolume | null = $state(null);
   let extendVG: VolumeGroup | null = $state(null);
@@ -248,7 +297,10 @@
         {#if dev.children?.length > 0}
           <div class="part-list">
             {#each dev.children as child (child.name)}
-              <div class="part-row">
+              {@const childMounts = child.fstype && child.fstype !== 'LVM2_member'
+                ? (summary.mounts ?? []).filter(m => m.device === child.path)
+                : []}
+              <div class="part-row" class:row-active={childMounts.some(m => usageMount === m.mountpoint)}>
                 <div class="part-tree">├─</div>
                 <span class="mono part-name">{child.name}</span>
                 <span class="badge badge-gray">{child.size_human}</span>
@@ -257,12 +309,16 @@
                 {:else if child.fstype}
                   <span class="badge badge-purple">{child.fstype}</span>
                 {/if}
-                {#if child.mountpoint}
-                  <span class="mono" style="font-size:0.72rem;color:var(--text-secondary)">{child.mountpoint}</span>
-                {/if}
                 {#if child.label}
                   <span style="font-size:0.72rem;color:var(--text-tertiary)">({child.label})</span>
                 {/if}
+                {#each childMounts as m (m.mountpoint)}
+                  <button class="btn btn-ghost browse-btn"
+                    onclick={() => openUsage(m.mountpoint)}
+                    title="Browse largest directories on {m.mountpoint}">
+                    {usageMount === m.mountpoint ? '▾' : '🔍'} {m.mountpoint}
+                  </button>
+                {/each}
                 <!-- Recurse one more level for nested LVM/crypto -->
                 {#each child.children ?? [] as gc (gc.name)}
                   <div class="gc-row">
@@ -284,11 +340,11 @@
       <div class="card" style="padding:0">
         <table class="data-table">
           <thead>
-            <tr><th>Mount point</th><th>Device</th><th>FS</th><th>Size</th><th>Used</th><th style="min-width:120px">Usage</th></tr>
+            <tr><th>Mount point</th><th>Device</th><th>FS</th><th>Size</th><th>Used</th><th style="min-width:120px">Usage</th><th></th></tr>
           </thead>
           <tbody>
             {#each (summary.mounts ?? []).filter(m => !(summary.volume_groups ?? []).some(vg => vg.volumes.some(lv => lv.mountpoint === m.mountpoint))) as m (m.mountpoint)}
-              <tr>
+              <tr class:row-active={usageMount === m.mountpoint}>
                 <td class="mono" style="font-weight:600">{m.mountpoint}</td>
                 <td class="mono" style="font-size:0.75rem;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis">{m.device}</td>
                 <td><span class="badge badge-gray">{m.fstype}</span></td>
@@ -304,6 +360,13 @@
                     <span class="mono" style="font-size:0.72rem;color:{barColor(m.use_percent)}">{m.use_percent.toFixed(0)}%</span>
                   </div>
                 </td>
+                <td>
+                  <button class="btn btn-ghost browse-btn"
+                    onclick={() => openUsage(m.mountpoint)}
+                    title="Browse largest directories">
+                    {usageMount === m.mountpoint ? '▾ Close' : '🔍 Browse'}
+                  </button>
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -311,6 +374,60 @@
       </div>
     {/if}
 
+  {/if}
+
+  <!-- ── Directory usage drill-down panel ──────────────────────── -->
+  {#if usageMount}
+    <div class="usage-panel card" style="margin-top:1rem;padding:0">
+      <div class="usage-panel-header">
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary)">Directory usage</span>
+          <!-- Breadcrumb -->
+          <nav class="breadcrumb">
+            {#each usageBreadcrumb as crumb, i}
+              {#if i > 0}<span class="crumb-sep">/</span>{/if}
+              {#if i === usageBreadcrumb.length - 1}
+                <span class="mono crumb-current">{i === 0 ? crumb : crumb.split('/').filter(Boolean).pop()}</span>
+              {:else}
+                <button class="btn btn-ghost crumb-link mono" onclick={() => jumpTo(i)}>
+                  {i === 0 ? crumb : crumb.split('/').filter(Boolean).pop()}
+                </button>
+              {/if}
+            {/each}
+          </nav>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <span style="font-size:0.72rem;color:var(--text-tertiary)">Device-locked · won't cross other mounts</span>
+          <button class="btn btn-ghost" onclick={closeUsage}>✕</button>
+        </div>
+      </div>
+
+      {#if usageError}
+        <div class="alert alert-error" style="margin:0.75rem">{usageError}</div>
+      {:else if usageLoading}
+        <div class="usage-loading">
+          <span class="spinner"></span> Scanning {usageMount}…
+        </div>
+      {:else if usageEntries.length === 0}
+        <div style="padding:2rem;text-align:center;color:var(--text-tertiary);font-size:0.85rem">No subdirectories found.</div>
+      {:else}
+        <div class="usage-list">
+          {#each usageEntries as entry (entry.path)}
+            {@const label = entry.path.split('/').filter(Boolean).pop() || entry.path}
+            {@const barW = maxUsageBytes > 0 ? (entry.bytes / maxUsageBytes * 100).toFixed(1) + '%' : '0%'}
+            <button class="usage-row" onclick={() => drillInto(entry)}>
+              <span class="mono usage-name" title={entry.path}>📁 {label}</span>
+              <div class="usage-bar-track">
+                <div class="usage-bar-fill" style="width:{barW}"></div>
+              </div>
+              <span class="mono usage-size">{entry.human}</span>
+              <span class="usage-pct-label">{entry.size_pct.toFixed(1)}%</span>
+              <span class="usage-drill">→</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
   {/if}
 
   <!-- ── Extend modal ───────────────────────────────────────────── -->
@@ -479,4 +596,44 @@
 .modal-header h2 { font-size:1rem; margin:0; }
 .modal-body { padding:1rem; }
 .modal-footer { display:flex; justify-content:flex-end; gap:0.5rem; padding:1rem; border-top:1px solid var(--border-subtle); }
+
+/* Directory usage drill-down */
+.row-active td { background:color-mix(in srgb, var(--accent) 6%, transparent); }
+.browse-btn { font-size:0.72rem; padding:0.2rem 0.5rem; white-space:nowrap; }
+
+.usage-panel-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; padding:0.75rem 1rem; border-bottom:1px solid var(--border-subtle); }
+
+.breadcrumb { display:flex; align-items:center; gap:0.1rem; flex-wrap:wrap; }
+.crumb-sep { color:var(--text-tertiary); padding:0 0.1rem; font-size:0.78rem; }
+.crumb-link { font-size:0.78rem; padding:0.1rem 0.25rem; color:var(--accent); }
+.crumb-current { font-size:0.78rem; color:var(--text-primary); font-weight:600; }
+
+.usage-loading { display:flex; align-items:center; gap:0.625rem; padding:1.5rem 1rem; color:var(--text-tertiary); font-size:0.85rem; }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border-default); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; flex-shrink:0; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+.usage-list { display:flex; flex-direction:column; }
+.usage-row {
+  display:grid;
+  grid-template-columns: minmax(140px,1.2fr) 1fr 80px 54px 16px;
+  align-items:center;
+  gap:0.75rem;
+  padding:0.45rem 1rem;
+  border-bottom:1px solid var(--border-subtle);
+  background:none;
+  border-left:none; border-right:none; border-top:none;
+  cursor:pointer;
+  text-align:left;
+  color:inherit;
+  font:inherit;
+  transition:background 0.1s;
+}
+.usage-row:last-child { border-bottom:none; }
+.usage-row:hover { background:var(--bg-raised); }
+.usage-name { font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.usage-bar-track { height:6px; background:var(--bg-raised); border-radius:3px; overflow:hidden; }
+.usage-bar-fill { height:100%; background:var(--accent); border-radius:3px; opacity:0.7; transition:width 0.2s; }
+.usage-size { font-size:0.82rem; font-weight:600; text-align:right; }
+.usage-pct-label { font-size:0.7rem; color:var(--text-tertiary); text-align:right; }
+.usage-drill { color:var(--text-tertiary); font-size:0.75rem; }
 </style>
