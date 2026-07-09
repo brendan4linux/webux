@@ -121,6 +121,9 @@ type Runtime interface {
 
 	// ContainerStats returns a single resource snapshot.
 	ContainerStats(ctx context.Context, id string) (*Stats, error)
+
+	// RunContainer creates and starts a new container. Returns the container ID.
+	RunContainer(ctx context.Context, cfg RunConfig) (string, error)
 }
 
 // Detect returns available container runtimes.

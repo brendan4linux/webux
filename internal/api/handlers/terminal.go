@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	osuser "os/user"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,13 +18,24 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+
+	"github.com/brendan4linux/webux/internal/auth"
 )
 
-// termUpgrader allows any origin — terminal is local-only admin tool.
 var termUpgrader = websocket.Upgrader{
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin:     wsCheckOrigin,
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
+}
+
+func wsCheckOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	origin = strings.TrimPrefix(origin, "https://")
+	origin = strings.TrimPrefix(origin, "http://")
+	return origin == r.Host
 }
 
 // TerminalHandler manages PTY sessions over WebSocket.
@@ -49,7 +62,7 @@ type termMsg struct {
 }
 
 // ServeTerminal handles GET /ws/terminal
-// Spawns a PTY, connects it to the WebSocket, cleans up on disconnect.
+// Spawns a PTY as the authenticated Webux user, connects it to the WebSocket, cleans up on disconnect.
 func (h *TerminalHandler) ServeTerminal(w http.ResponseWriter, r *http.Request) {
 	conn, err := termUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -58,14 +71,20 @@ func (h *TerminalHandler) ServeTerminal(w http.ResponseWriter, r *http.Request) 
 	}
 	defer conn.Close()
 
-	shell := h.resolveShell()
+	// Resolve the logged-in username from the JWT stored in context.
+	username := ""
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		username = claims.Username
+	}
 
-	// Build the command — login shell behaviour
-	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(),
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-	)
+	shell, sysProcAttr, env, dir := h.resolveUserContext(username)
+
+	cmd := exec.Command(shell, "-l")
+	cmd.Env = env
+	cmd.Dir = dir
+	if sysProcAttr != nil {
+		cmd.SysProcAttr = sysProcAttr
+	}
 
 	// Start with a PTY
 	ptmx, err := pty.Start(cmd)
@@ -144,14 +163,18 @@ func (h *TerminalHandler) ServeTerminal(w http.ResponseWriter, r *http.Request) 
 
 // Settings handles GET /api/terminal/settings
 func (h *TerminalHandler) Settings(w http.ResponseWriter, r *http.Request) {
-	shell := h.resolveShell()
+	username := ""
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		username = claims.Username
+	}
+	shell, _, _, _ := h.resolveUserContext(username)
 	configuredShell := h.getSetting("terminal.shell")
 	quickCmds := h.getSetting("terminal.quick_commands")
 
 	writeJSON(w, map[string]interface{}{
 		"shell":            shell,
 		"configured_shell": configuredShell,
-		"quick_commands":   quickCmds, // raw JSON string — frontend parses
+		"quick_commands":   quickCmds,
 	})
 }
 
@@ -174,31 +197,93 @@ func (h *TerminalHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true})
 }
 
-// resolveShell returns the shell to use, in preference order:
-// 1. Configured override in settings
-// 2. Current user's login shell from /etc/passwd
-// 3. Fall back to /bin/bash → /bin/sh
-func (h *TerminalHandler) resolveShell() string {
-	if s := h.getSetting("terminal.shell"); s != "" {
-		if _, err := exec.LookPath(s); err == nil {
-			return s
+// resolveUserContext returns the shell, SysProcAttr, environment, and working directory
+// to use for the terminal, scoped to the given username (the Webux login user).
+//
+// If webux runs as root, it will setuid/setgid to the target user.
+// If the username is empty, "root", or lookup fails, it falls back to the process user.
+func (h *TerminalHandler) resolveUserContext(username string) (shell string, attr *syscall.SysProcAttr, env []string, dir string) {
+	// Shell override from settings (applies regardless of user)
+	configuredShell := h.getSetting("terminal.shell")
+
+	// Try to look up the OS user matching the Webux login
+	var u *osuser.User
+	if username != "" && username != "sso" {
+		u, _ = osuser.Lookup(username)
+	}
+	if u == nil {
+		// Fall back to the process's own user
+		u, _ = osuser.Current()
+	}
+
+	// Resolve shell: settings override → user's login shell → fallback
+	shell = configuredShell
+	if shell == "" && u != nil {
+		shell = userLoginShell(u.Username)
+	}
+	if shell == "" {
+		for _, sh := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh"} {
+			if _, err := os.Stat(sh); err == nil {
+				shell = sh
+				break
+			}
 		}
 	}
-	// Current user's shell from /etc/passwd
-	if shell := currentUserShell(); shell != "" {
-		return shell
+	if shell == "" {
+		shell = "/bin/sh"
 	}
-	// Fallbacks
-	for _, sh := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh"} {
-		if _, err := os.Stat(sh); err == nil {
-			return sh
+
+	// Default to process working directory / home
+	dir = "/"
+	if u != nil && u.HomeDir != "" {
+		dir = u.HomeDir
+	}
+
+	// Build a clean login environment for the user
+	env = []string{
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"LANG=en_US.UTF-8",
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"SHELL=" + shell,
+	}
+	if u != nil {
+		env = append(env,
+			"HOME="+u.HomeDir,
+			"USER="+u.Username,
+			"LOGNAME="+u.Username,
+		)
+	}
+
+	// Set credentials if we're running as root and need to drop to a different user
+	if u != nil && os.Getuid() == 0 {
+		uid64, err1 := strconv.ParseUint(u.Uid, 10, 32)
+		gid64, err2 := strconv.ParseUint(u.Gid, 10, 32)
+		if err1 == nil && err2 == nil {
+			// Collect supplementary groups
+			groupIDs, _ := u.GroupIds()
+			var gids []uint32
+			for _, g := range groupIDs {
+				if n, err := strconv.ParseUint(g, 10, 32); err == nil {
+					gids = append(gids, uint32(n))
+				}
+			}
+			attr = &syscall.SysProcAttr{
+				Credential: &syscall.Credential{
+					Uid:    uint32(uid64),
+					Gid:    uint32(gid64),
+					Groups: gids,
+				},
+				Setsid: true,
+			}
 		}
 	}
-	return "/bin/sh"
+
+	return shell, attr, env, dir
 }
 
-func currentUserShell() string {
-	uid := os.Getuid()
+// userLoginShell reads /etc/passwd to find the login shell for the given username.
+func userLoginShell(username string) string {
 	f, err := os.Open("/etc/passwd")
 	if err != nil {
 		return ""
@@ -207,16 +292,12 @@ func currentUserShell() string {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), ":")
-		if len(fields) < 7 {
+		if len(fields) < 7 || fields[0] != username {
 			continue
 		}
-		var entryUID int
-		fmt.Sscanf(fields[2], "%d", &entryUID)
-		if entryUID == uid {
-			sh := strings.TrimSpace(fields[6])
-			if sh != "" && sh != "/sbin/nologin" && sh != "/bin/false" {
-				return sh
-			}
+		sh := strings.TrimSpace(fields[6])
+		if sh != "" && sh != "/sbin/nologin" && sh != "/bin/false" && sh != "/usr/sbin/nologin" {
+			return sh
 		}
 	}
 	return ""

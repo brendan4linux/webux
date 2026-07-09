@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import CLIEchoPane from '$components/CLIEchoPane.svelte';
 
+  interface Port { host_port:number; container_port:number; protocol:string; }
+  interface Mount { source:string; destination:string; rw:boolean; }
   interface Container {
-    id: string; short_id: string; name: string; image: string;
-    state: string; status: string; created: string;
-    ports: {host_port:number, container_port:number, protocol:string}[];
-    mounts: {source:string, destination:string, rw:boolean}[];
-    networks: string[];
-    size_rw: number; size_rootfs: number;
+    id:string; short_id:string; name:string; image:string;
+    state:string; status:string; created:string;
+    ports:Port[]; mounts:Mount[]; networks:string[];
+    size_rw:number; size_rootfs:number;
   }
   interface Image {
-    id: string; short_id: string; tags: string[];
-    created: string; size_bytes: number;
+    id:string; short_id:string; tags:string[];
+    created:string; size_bytes:number;
   }
 
   let containers: Container[] = $state([]);
@@ -31,13 +31,27 @@
   let pullRef = $state('');
   let pulling = $state(false);
 
+  // ── Delete confirmation ────────────────────────────────────────────────
+  let confirmDelete = $state<{id:string; name:string} | null>(null);
+
+  // ── Deploy modal ───────────────────────────────────────────────────────
+  interface DeployPort  { host:string; container:string; }
+  interface DeployMount { host:string; container:string; }
+  interface DeployEnv   { key:string; value:string; }
+  let deployImage = $state<Image|null>(null);
+  let deployName  = $state('');
+  let deployPorts:  DeployPort[]  = $state([{ host:'', container:'' }]);
+  let deployMounts: DeployMount[] = $state([{ host:'', container:'' }]);
+  let deployEnvs:   DeployEnv[]   = $state([{ key:'', value:'' }]);
+  let deploying = $state(false);
+  let deployError = $state('');
+
   async function load() {
     loading = true; error = '';
     try {
       const statusRes = await api.get<any>('/api/containers/status');
       runtimes = statusRes.runtimes ?? [];
       if (!selectedRuntime && runtimes.length) selectedRuntime = runtimes[0];
-
       const [cRes, iRes] = await Promise.all([
         api.get<any>(`/api/containers?runtime=${selectedRuntime}&all=${showAll}`),
         api.get<any>(`/api/containers/images?runtime=${selectedRuntime}`),
@@ -48,7 +62,16 @@
     finally { loading = false; }
   }
 
-  async function doAction(id: string, action: string) {
+  async function doAction(id: string, action: string, name?: string) {
+    // Confirm before removing
+    if (action === 'remove') {
+      confirmDelete = { id, name: name ?? id.slice(0,12) };
+      return;
+    }
+    await runAction(id, action);
+  }
+
+  async function runAction(id: string, action: string) {
     actionPending = id + ':' + action;
     try {
       await api.post(`/api/containers/${id}/action?runtime=${selectedRuntime}`,
@@ -56,6 +79,13 @@
       await load();
     } catch(e: any) { error = e.message; }
     finally { actionPending = null; }
+  }
+
+  async function confirmAndRemove() {
+    if (!confirmDelete) return;
+    const { id } = confirmDelete;
+    confirmDelete = null;
+    await runAction(id, 'remove');
   }
 
   async function showLogs(id: string) {
@@ -68,6 +98,43 @@
         .map(l => l.slice(6));
     } catch(e: any) { error = String(e); }
     finally { logsLoading = false; }
+  }
+
+  // ── Deploy from image ──────────────────────────────────────────────────
+  function openDeploy(img: Image) {
+    deployImage = img;
+    const tag = img.tags?.[0] ?? '';
+    deployName = tag.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || '';
+    deployPorts  = [{ host:'', container:'' }];
+    deployMounts = [{ host:'', container:'' }];
+    deployEnvs   = [{ key:'', value:'' }];
+    deployError  = '';
+    deploying    = false;
+  }
+
+  async function runDeploy() {
+    if (!deployImage) return;
+    deploying = true; deployError = '';
+    const tag = deployImage.tags?.[0] ?? deployImage.short_id;
+
+    // Build docker run equivalent args
+    const ports  = deployPorts.filter(p => p.host && p.container);
+    const mounts = deployMounts.filter(m => m.host && m.container);
+    const envs   = deployEnvs.filter(e => e.key);
+
+    try {
+      await api.post(`/api/containers/run?runtime=${selectedRuntime}`, {
+        image:  tag,
+        name:   deployName || undefined,
+        ports:  ports,
+        mounts: mounts,
+        env:    envs,
+      });
+      deployImage = null;
+      tab = 'containers';
+      await load();
+    } catch(e: any) { deployError = e.message; }
+    finally { deploying = false; }
   }
 
   function stateClass(state: string) {
@@ -129,6 +196,7 @@
       </button>
     </div>
 
+    <!-- ── Containers tab ─────────────────────────────────────────── -->
     {#if tab === 'containers'}
       <div class="card" style="padding:0">
         <table class="data-table">
@@ -170,20 +238,20 @@
                       {#if c.state === 'running'}
                         <button class="btn btn-ghost" style="font-size:0.72rem"
                           disabled={actionPending !== null}
-                          onclick={() => doAction(c.id, 'stop')}>■ Stop</button>
+                          onclick={() => doAction(c.id, 'stop', c.name)}>■ Stop</button>
                         <button class="btn btn-ghost" style="font-size:0.72rem"
                           disabled={actionPending !== null}
-                          onclick={() => doAction(c.id, 'restart')}>↺</button>
+                          onclick={() => doAction(c.id, 'restart', c.name)}>↺</button>
                       {:else}
                         <button class="btn btn-primary" style="font-size:0.72rem"
                           disabled={actionPending !== null}
-                          onclick={() => doAction(c.id, 'start')}>▶ Start</button>
+                          onclick={() => doAction(c.id, 'start', c.name)}>▶ Start</button>
                       {/if}
                       <button class="btn btn-ghost" style="font-size:0.72rem"
                         onclick={() => showLogs(c.id)}>≡ Logs</button>
                       <button class="btn btn-ghost" style="font-size:0.72rem;color:var(--red)"
                         disabled={actionPending !== null}
-                        onclick={() => doAction(c.id, 'remove')}>✕</button>
+                        onclick={() => doAction(c.id, 'remove', c.name)}>✕ Remove</button>
                     </div>
                   </td>
                 </tr>
@@ -216,19 +284,19 @@
         </table>
       </div>
 
+    <!-- ── Images tab ─────────────────────────────────────────────── -->
     {:else}
-      <!-- Images tab -->
       <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem">
         <input class="search-input" style="max-width:280px" bind:value={pullRef}
           placeholder="nginx:latest, ubuntu:22.04…" />
-        <button class="btn btn-primary" onclick={() => {}} disabled={pulling || !pullRef}>
+        <button class="btn btn-primary" disabled={pulling || !pullRef}>
           {pulling ? 'Pulling…' : '⬇ Pull image'}
         </button>
       </div>
       <div class="card" style="padding:0">
         <table class="data-table">
           <thead>
-            <tr><th>Tags</th><th>ID</th><th>Created</th><th>Size</th><th style="text-align:right">Remove</th></tr>
+            <tr><th>Tags</th><th>ID</th><th>Created</th><th>Size</th><th style="text-align:right">Actions</th></tr>
           </thead>
           <tbody>
             {#if loading}
@@ -248,8 +316,12 @@
                   <td style="font-size:0.78rem;color:var(--text-secondary)">{new Date(img.created).toLocaleDateString()}</td>
                   <td class="mono" style="font-size:0.75rem">{fmtSize(img.size_bytes)}</td>
                   <td style="text-align:right">
-                    <button class="btn btn-ghost" style="color:var(--red);font-size:0.72rem"
-                      onclick={() => doAction(img.id, 'remove')}>✕</button>
+                    <div style="display:flex;gap:0.25rem;justify-content:flex-end">
+                      <button class="btn btn-primary" style="font-size:0.72rem"
+                        onclick={() => openDeploy(img)}>▶ Deploy</button>
+                      <button class="btn btn-ghost" style="color:var(--red);font-size:0.72rem"
+                        onclick={() => doAction(img.id, 'remove')}>✕</button>
+                    </div>
                   </td>
                 </tr>
               {/each}
@@ -258,6 +330,143 @@
         </table>
       </div>
     {/if}
+  {/if}
+
+  <!-- ── Delete confirmation modal ──────────────────────────────── -->
+  {#if confirmDelete}
+    <div class="modal-overlay" role="button" tabindex="0"
+      onkeydown={(e) => e.key === 'Escape' && (confirmDelete = null)}
+      onclick={() => confirmDelete = null}>
+      <div class="modal confirm-modal" role="dialog" tabindex="-1"
+        onclick={(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <h2>Remove container?</h2>
+        </div>
+        <div class="modal-body">
+          <p>Are you sure you want to remove <strong class="mono">{confirmDelete.name}</strong>?</p>
+          <p style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.375rem">
+            This will delete the container. Volumes will not be removed.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick={() => confirmDelete = null}>Cancel</button>
+          <button class="btn btn-danger" onclick={confirmAndRemove}>Remove</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ── Deploy modal ───────────────────────────────────────────── -->
+  {#if deployImage}
+    <div class="modal-overlay" role="button" tabindex="0"
+      onkeydown={(e) => e.key === 'Escape' && !deploying && (deployImage = null)}
+      onclick={() => !deploying && (deployImage = null)}>
+      <div class="modal deploy-modal" role="dialog" tabindex="-1"
+        onclick={(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <h2>Deploy image</h2>
+          {#if !deploying}
+            <button class="btn btn-ghost" onclick={() => deployImage = null}>✕</button>
+          {/if}
+        </div>
+        <div class="modal-body">
+          <!-- Image name -->
+          <div class="deploy-image-name mono">
+            {deployImage.tags?.[0] ?? deployImage.short_id}
+          </div>
+
+          <!-- Container name -->
+          <div class="field">
+            <label>Container name <span class="optional">(optional)</span></label>
+            <input class="search-input" bind:value={deployName} placeholder="my-container"
+              disabled={deploying} />
+          </div>
+
+          <!-- Ports -->
+          <div class="field">
+            <label>Port mappings <span class="optional">(-p host:container)</span></label>
+            {#each deployPorts as p, i}
+              <div class="mapping-row">
+                <input class="search-input mono" style="width:100px" bind:value={p.host}
+                  placeholder="8080" disabled={deploying} />
+                <span class="mapping-sep">→</span>
+                <input class="search-input mono" style="width:100px" bind:value={p.container}
+                  placeholder="80" disabled={deploying} />
+                {#if deployPorts.length > 1}
+                  <button class="btn btn-ghost" style="font-size:0.72rem"
+                    onclick={() => deployPorts = deployPorts.filter((_, j) => j !== i)}>✕</button>
+                {/if}
+              </div>
+            {/each}
+            <button class="btn btn-ghost" style="font-size:0.72rem;margin-top:0.25rem"
+              onclick={() => deployPorts = [...deployPorts, { host:'', container:'' }]}
+              disabled={deploying}>+ Add port</button>
+          </div>
+
+          <!-- Volumes -->
+          <div class="field">
+            <label>Volume mounts <span class="optional">(-v host:container)</span></label>
+            {#each deployMounts as m, i}
+              <div class="mapping-row">
+                <input class="search-input mono" style="flex:1" bind:value={m.host}
+                  placeholder="/host/path" disabled={deploying} />
+                <span class="mapping-sep">:</span>
+                <input class="search-input mono" style="flex:1" bind:value={m.container}
+                  placeholder="/container/path" disabled={deploying} />
+                {#if deployMounts.length > 1}
+                  <button class="btn btn-ghost" style="font-size:0.72rem"
+                    onclick={() => deployMounts = deployMounts.filter((_, j) => j !== i)}>✕</button>
+                {/if}
+              </div>
+            {/each}
+            <button class="btn btn-ghost" style="font-size:0.72rem;margin-top:0.25rem"
+              onclick={() => deployMounts = [...deployMounts, { host:'', container:'' }]}
+              disabled={deploying}>+ Add mount</button>
+          </div>
+
+          <!-- Environment variables -->
+          <div class="field">
+            <label>Environment variables <span class="optional">(-e KEY=value)</span></label>
+            {#each deployEnvs as e, i}
+              <div class="mapping-row">
+                <input class="search-input mono" style="width:130px" bind:value={e.key}
+                  placeholder="ENV_VAR" disabled={deploying} />
+                <span class="mapping-sep">=</span>
+                <input class="search-input mono" style="flex:1" bind:value={e.value}
+                  placeholder="value" disabled={deploying} />
+                {#if deployEnvs.length > 1}
+                  <button class="btn btn-ghost" style="font-size:0.72rem"
+                    onclick={() => deployEnvs = deployEnvs.filter((_, j) => j !== i)}>✕</button>
+                {/if}
+              </div>
+            {/each}
+            <button class="btn btn-ghost" style="font-size:0.72rem;margin-top:0.25rem"
+              onclick={() => deployEnvs = [...deployEnvs, { key:'', value:'' }]}
+              disabled={deploying}>+ Add env var</button>
+          </div>
+
+          <!-- Preview command -->
+          <div class="preview-cmd mono">
+            {selectedRuntime} run -d
+            {deployName ? `--name ${deployName}` : ''}
+            {deployPorts.filter(p=>p.host&&p.container).map(p=>`-p ${p.host}:${p.container}`).join(' ')}
+            {deployMounts.filter(m=>m.host&&m.container).map(m=>`-v ${m.host}:${m.container}`).join(' ')}
+            {deployEnvs.filter(e=>e.key).map(e=>`-e ${e.key}=${e.value}`).join(' ')}
+            {deployImage.tags?.[0] ?? deployImage.short_id}
+          </div>
+
+          {#if deployError}
+            <div class="alert alert-error" style="margin-top:0.5rem">{deployError}</div>
+          {/if}
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick={() => deployImage = null} disabled={deploying}>Cancel</button>
+          <button class="btn btn-primary" onclick={runDeploy} disabled={deploying}>
+            {deploying ? '⟳ Deploying…' : '▶ Deploy'}
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   <CLIEchoPane context="containers" />
@@ -282,4 +491,25 @@
 .log-panel-header { display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; background:var(--bg-raised); border-bottom:1px solid var(--border-subtle); font-size:0.82rem; }
 .log-body { max-height:280px; overflow-y:auto; padding:0.5rem 1rem; }
 .log-line { font-size:0.72rem; color:var(--text-secondary); line-height:1.5; white-space:pre-wrap; word-break:break-all; }
+/* Modals */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:500; }
+.modal { background:var(--bg-panel); border:1px solid var(--border-default); border-radius:var(--r-lg); }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:1rem; border-bottom:1px solid var(--border-subtle); }
+.modal-header h2 { font-size:1rem; margin:0; }
+.modal-body { padding:1rem; display:flex; flex-direction:column; gap:0.875rem; max-height:70vh; overflow-y:auto; }
+.modal-footer { display:flex; justify-content:flex-end; gap:0.5rem; padding:1rem; border-top:1px solid var(--border-subtle); }
+/* Confirm modal */
+.confirm-modal { width:380px; max-width:95vw; }
+.confirm-modal p { font-size:0.85rem; margin:0; }
+/* Deploy modal */
+.deploy-modal { width:540px; max-width:95vw; }
+.deploy-image-name { font-size:0.82rem; color:var(--accent); background:var(--bg-raised); padding:0.375rem 0.625rem; border-radius:var(--r-sm); border:1px solid var(--border-subtle); }
+.field { display:flex; flex-direction:column; gap:0.375rem; }
+.field label { font-size:0.72rem; font-weight:500; color:var(--text-secondary); }
+.optional { color:var(--text-tertiary); font-weight:400; }
+.mapping-row { display:flex; align-items:center; gap:0.375rem; margin-bottom:0.25rem; }
+.mapping-sep { color:var(--text-tertiary); font-family:var(--font-mono); font-size:0.82rem; flex-shrink:0; }
+.preview-cmd { font-size:0.68rem; color:var(--text-tertiary); background:var(--bg-base); border-radius:var(--r-sm); padding:0.5rem 0.625rem; border-left:2px solid var(--border-default); white-space:pre-wrap; word-break:break-all; line-height:1.7; }
+.btn-danger { background:var(--red); color:#fff; border-color:var(--red); }
+.btn-danger:hover { opacity:0.85; }
 </style>

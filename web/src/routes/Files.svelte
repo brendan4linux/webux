@@ -25,11 +25,22 @@
   let showChmod = $state(false);
   let chmodTarget = $state<Entry|null>(null);
   let chmodValue = $state('644');
+  let fileSaved = $state(false);
+  let sudoMode = $state(false);
+
+  // ── Upload ───────────────────────────────────────────────────────────
+  let uploadInput: HTMLInputElement;
+  let uploading = $state(false);
+  let uploadProgress = $state('');
+
+  function sudoParam() {
+    return sudoMode ? '&sudo=true' : '';
+  }
 
   async function browse(path: string) {
     loading = true; error = ''; selectedEntry = null; view = 'browser';
     try {
-      const res = await api.get<any>(`/api/files?path=${encodeURIComponent(path)}`);
+      const res = await api.get<any>(`/api/files?path=${encodeURIComponent(path)}${sudoParam()}`);
       entries = res.entries ?? [];
       currentPath = res.path ?? path;
     } catch(e: any) { error = e.message; }
@@ -41,19 +52,18 @@
     selectedEntry = entry;
     fileLoading = true; fileError = ''; view = 'editor';
     try {
-      const res = await api.get<any>(`/api/files/read?path=${encodeURIComponent(entry.path)}`);
+      const res = await api.get<any>(`/api/files/read?path=${encodeURIComponent(entry.path)}${sudoParam()}`);
       fileContent = res.content ?? '';
     } catch(e: any) { fileError = e.message; }
     finally { fileLoading = false; }
   }
 
-  let fileSaved = $state(false);
-
   async function saveFile() {
     if (!selectedEntry) return;
     fileSaving = true; fileError = ''; fileSaved = false;
     try {
-      await api.put('/api/files/write', { path: selectedEntry.path, content: fileContent });
+      const qs = sudoMode ? '?sudo=true' : '';
+      await api.put(`/api/files/write${qs}`, { path: selectedEntry.path, content: fileContent });
       fileSaved = true;
       setTimeout(() => fileSaved = false, 2500);
     } catch(e: any) { fileError = e.message; }
@@ -63,7 +73,7 @@
   async function deleteEntry(entry: Entry) {
     if (!confirm(`Delete ${entry.name}?`)) return;
     try {
-      await api.delete(`/api/files?path=${encodeURIComponent(entry.path)}`);
+      await api.delete(`/api/files?path=${encodeURIComponent(entry.path)}${sudoParam()}`);
       await browse(currentPath);
     } catch(e: any) { error = e.message; }
   }
@@ -71,8 +81,9 @@
   async function mkdir() {
     if (!newDirName) return;
     const path = currentPath.replace(/\/$/, '') + '/' + newDirName;
+    const qs = sudoMode ? '?sudo=true' : '';
     try {
-      await api.post('/api/files/mkdir', { path });
+      await api.post(`/api/files/mkdir${qs}`, { path });
       showNewDir = false; newDirName = '';
       await browse(currentPath);
     } catch(e: any) { error = e.message; }
@@ -80,11 +91,39 @@
 
   async function applyChmod() {
     if (!chmodTarget) return;
+    const qs = sudoMode ? '?sudo=true' : '';
     try {
-      await api.post('/api/files/chmod', { path: chmodTarget.path, mode: chmodValue });
+      await api.post(`/api/files/chmod${qs}`, { path: chmodTarget.path, mode: chmodValue });
       showChmod = false;
       await browse(currentPath);
     } catch(e: any) { error = e.message; }
+  }
+
+  async function handleUpload(evt: Event) {
+    const files = (evt.target as HTMLInputElement).files;
+    if (!files || files.length === 0) return;
+    uploading = true; error = '';
+    let done = 0;
+    for (const file of Array.from(files)) {
+      uploadProgress = `Uploading ${file.name} (${done + 1}/${files.length})…`;
+      const form = new FormData();
+      form.append('file', file);
+      form.append('path', currentPath.replace(/\/$/, '') + '/' + file.name);
+      try {
+        const url = `/api/files/upload?path=${encodeURIComponent(currentPath)}${sudoParam()}`;
+        const res = await fetch(url, { method: 'POST', body: form });
+        if (!res.ok) throw new Error(await res.text());
+      } catch(e: any) { error = `Failed to upload ${file.name}: ${e.message}`; }
+      done++;
+    }
+    uploading = false; uploadProgress = '';
+    uploadInput.value = '';
+    await browse(currentPath);
+  }
+
+  function toggleSudo() {
+    sudoMode = !sudoMode;
+    browse(currentPath);
   }
 
   function breadcrumbs(): {label:string, path:string}[] {
@@ -135,15 +174,38 @@
       {#if view === 'editor' && selectedEntry}
         <button class="btn" onclick={() => { view = 'browser'; selectedEntry = null; }}>← Back</button>
         <button class="btn btn-primary" onclick={saveFile} disabled={fileSaving}
-        style={fileSaved ? 'background:var(--green);border-color:var(--green)' : ''}>
-        {fileSaving ? 'Saving…' : fileSaved ? '✓ Saved' : '💾 Save'}
-      </button>
+          style={fileSaved ? 'background:var(--green);border-color:var(--green)' : ''}>
+          {fileSaving ? 'Saving…' : fileSaved ? '✓ Saved' : '💾 Save'}
+        </button>
       {:else}
         <button class="btn" onclick={() => showNewDir = true}>+ New folder</button>
+
+        <label class="btn upload-btn" class:uploading>
+          <input type="file" multiple bind:this={uploadInput}
+            onchange={handleUpload} style="display:none" disabled={uploading} />
+          {uploading ? uploadProgress || 'Uploading…' : '⬆ Upload'}
+        </label>
+
         <button class="btn" onclick={() => browse(currentPath)} disabled={loading}>⟳ Refresh</button>
       {/if}
+
+      <!-- Sudo toggle -->
+      <button
+        class="btn sudo-btn"
+        class:sudo-active={sudoMode}
+        onclick={toggleSudo}
+        title={sudoMode ? 'Running as root (sudo -n). Click to switch back to user mode.' : 'Click to enable sudo mode for root access'}>
+        {sudoMode ? '🔓 sudo' : '🔒 sudo'}
+      </button>
     </div>
   </div>
+
+  {#if sudoMode}
+    <div class="sudo-banner">
+      <span>⚡ Sudo mode — browsing and editing as root. Requires NOPASSWD sudo or webux running as root.</span>
+      <button class="btn btn-ghost" style="font-size:0.72rem;padding:0.2rem 0.5rem" onclick={toggleSudo}>Disable</button>
+    </div>
+  {/if}
 
   {#if error}<div class="alert alert-error" style="margin-bottom:0.75rem">{error}</div>{/if}
 
@@ -156,7 +218,6 @@
         <button class="btn btn-ghost" onclick={() => { showNewDir=false; newDirName=''; }}>Cancel</button>
       </div>
     {/if}
-
     <div class="card" style="padding:0;overflow-x:auto">
       <table class="data-table files-table">
         <thead>
@@ -172,9 +233,7 @@
           {:else}
             {#if currentPath !== '/'}
               <tr class="file-row" onclick={() => browse(currentPath.split('/').slice(0,-1).join('/') || '/')}>
-                <td colspan="6" style="color:var(--text-tertiary);font-family:var(--font-mono)">
-                  📁 ..
-                </td>
+                <td colspan="6" style="color:var(--text-tertiary);font-family:var(--font-mono)">📁 ..</td>
               </tr>
             {/if}
             {#each entries as entry (entry.path)}
@@ -202,7 +261,7 @@
                     </button>
                     {#if !entry.is_dir}
                       <a class="btn btn-ghost" style="font-size:0.68rem"
-                        href={`/api/files/download?path=${encodeURIComponent(entry.path)}`}>↓</a>
+                        href={`/api/files/download?path=${encodeURIComponent(entry.path)}${sudoParam()}`}>↓</a>
                     {/if}
                     <button class="btn btn-ghost" style="font-size:0.68rem;color:var(--red)"
                       onclick={() => deleteEntry(entry)}>✕</button>
@@ -247,7 +306,7 @@
       <div class="skeleton" style="height:400px;border-radius:var(--r-md)"></div>
     {:else}
       <div style="font-size:0.72rem;color:var(--text-tertiary);margin-bottom:0.375rem">
-        {selectedEntry?.path}
+        {selectedEntry?.path}{sudoMode ? ' (sudo)' : ''}
       </div>
       <textarea class="file-editor mono" bind:value={fileContent} spellcheck="false"></textarea>
     {/if}
@@ -273,4 +332,10 @@
 .modal-header h2 { font-size:1rem; margin:0; }
 .modal-body { padding:1rem; display:flex; flex-direction:column; gap:0.375rem; }
 .modal-footer { display:flex; justify-content:flex-end; gap:0.5rem; padding:1rem; border-top:1px solid var(--border-subtle); }
+.upload-btn { cursor:pointer; }
+.upload-btn.uploading { opacity:0.65; pointer-events:none; }
+.sudo-btn { font-family:var(--font-mono); font-size:0.75rem; opacity:0.65; }
+.sudo-btn:hover { opacity:1; }
+.sudo-active { opacity:1; background:var(--yellow,#f59e0b) !important; border-color:var(--yellow,#f59e0b) !important; color:#000 !important; }
+.sudo-banner { display:flex; align-items:center; justify-content:space-between; gap:1rem; background:color-mix(in srgb, var(--yellow,#f59e0b) 15%, transparent); border:1px solid color-mix(in srgb, var(--yellow,#f59e0b) 40%, transparent); border-radius:var(--r-md); padding:0.5rem 0.875rem; margin-bottom:0.75rem; font-size:0.78rem; }
 </style>

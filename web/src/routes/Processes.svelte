@@ -4,22 +4,11 @@
   import CLIEchoPane from '$components/CLIEchoPane.svelte';
 
   interface Process {
-    pid: number;
-    ppid: number;
-    name: string;
-    cmdline: string;
-    state: string;
-    state_name: string;
-    username: string;
-    uid: number;
-    cpu_percent: number;
-    mem_rss_kb: number;
-    mem_vsz_kb: number;
-    threads: number;
-    priority: number;
-    nice: number;
-    start_time: string;
-    open_fds: number;
+    pid: number; ppid: number; name: string; cmdline: string;
+    state: string; state_name: string; username: string; uid: number;
+    cpu_percent: number; mem_rss_kb: number; mem_vsz_kb: number;
+    threads: number; priority: number; nice: number;
+    start_time: string; open_fds: number;
   }
 
   let procs: Process[] = $state([]);
@@ -29,7 +18,7 @@
   let filterText = $state('');
   let sortField = $state('cpu');
   let sortAsc = $state(false);
-  let autoRefresh = $state(false);
+  let autoRefresh = $state(true);   // ← ON by default
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let expandedPid = $state<number | null>(null);
 
@@ -61,6 +50,9 @@
     } else {
       if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
     }
+    return () => {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    };
   });
 
   let filtered = $derived(procs.filter(p => {
@@ -116,11 +108,9 @@
       </button>
     </div>
   </div>
-
   {#if error}
     <div class="alert alert-error" style="margin-bottom:1rem">{error}</div>
   {/if}
-
   <div class="filter-bar">
     <input class="search-input" style="max-width:320px" type="search"
       placeholder="Filter by name, PID, user, cmdline…" bind:value={filterText} />
@@ -128,7 +118,6 @@
       {filtered.length} shown
     </span>
   </div>
-
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="data-table proc-table">
       <thead>
@@ -138,10 +127,7 @@
           <th class="sortable" onclick={() => toggleSort('user')}>User{sortIcon('user')}</th>
           <th class="sortable" onclick={() => toggleSort('cpu')}>CPU%{sortIcon('cpu')}</th>
           <th class="sortable" onclick={() => toggleSort('mem')}>RSS{sortIcon('mem')}</th>
-          <th>State</th>
-          <th>Threads</th>
-          <th>Nice</th>
-          <th>Started</th>
+          <th>State</th><th>Threads</th><th>Nice</th><th>Started</th>
         </tr>
       </thead>
       <tbody>
@@ -160,9 +146,7 @@
             <tr class="proc-row" class:expanded={expandedPid === p.pid}
               onclick={() => expandedPid = expandedPid === p.pid ? null : p.pid}>
               <td class="mono" style="color:var(--text-tertiary)">{p.pid}</td>
-              <td class="proc-name">
-                <span class="mono" style="font-weight:500">{p.name}</span>
-              </td>
+              <td class="proc-name"><span class="mono" style="font-weight:500">{p.name}</span></td>
               <td class="mono" style="font-size:0.72rem;color:var(--text-secondary)">{p.username}</td>
               <td>
                 <span class="mono" style="font-weight:600;color:{cpuColor(p.cpu_percent)}">
@@ -180,20 +164,16 @@
                 <td colspan="9">
                   <div class="proc-detail">
                     <div class="detail-row">
-                      <span class="detail-label">PPID</span>
-                      <span class="mono">{p.ppid}</span>
+                      <span class="detail-label">PPID</span><span class="mono">{p.ppid}</span>
                     </div>
                     <div class="detail-row">
-                      <span class="detail-label">VSZ</span>
-                      <span class="mono">{fmtMem(p.mem_vsz_kb)}</span>
+                      <span class="detail-label">VSZ</span><span class="mono">{fmtMem(p.mem_vsz_kb)}</span>
                     </div>
                     <div class="detail-row">
-                      <span class="detail-label">Open FDs</span>
-                      <span class="mono">{p.open_fds}</span>
+                      <span class="detail-label">Open FDs</span><span class="mono">{p.open_fds}</span>
                     </div>
                     <div class="detail-row">
-                      <span class="detail-label">Priority</span>
-                      <span class="mono">{p.priority}</span>
+                      <span class="detail-label">Priority</span><span class="mono">{p.priority}</span>
                     </div>
                     <div class="detail-row" style="grid-column:1/-1">
                       <span class="detail-label">Cmdline</span>
@@ -208,35 +188,25 @@
       </tbody>
     </table>
   </div>
-
   <CLIEchoPane context="processes" />
 </div>
 
 <style>
 .proc-page { max-width:1300px; padding-bottom:220px; }
-
 .filter-bar { display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem; }
-
 .auto-refresh { display:flex; align-items:center; gap:0.375rem; font-size:0.78rem; color:var(--text-secondary); cursor:pointer; }
-
 .proc-table { font-size:0.78rem; }
 .sortable { cursor:pointer; user-select:none; }
 .sortable:hover { color:var(--text-primary) !important; }
-
 .proc-row { cursor:pointer; }
 .proc-row:hover { background:var(--bg-hover); }
 .proc-row.expanded { background:var(--accent-dim); }
-
 .proc-name { max-width:180px; overflow:hidden; }
-
 .proc-detail-row td { padding:0; }
 .proc-detail {
-  display:grid;
-  grid-template-columns:repeat(4, 1fr);
-  gap:0.5rem;
-  padding:0.75rem 1rem;
-  background:var(--bg-raised);
-  border-top:1px solid var(--border-subtle);
+  display:grid; grid-template-columns:repeat(4, 1fr);
+  gap:0.5rem; padding:0.75rem 1rem;
+  background:var(--bg-raised); border-top:1px solid var(--border-subtle);
 }
 .detail-row { display:flex; flex-direction:column; gap:2px; }
 .detail-label { font-size:0.65rem; font-weight:500; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.05em; }

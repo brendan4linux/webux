@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,9 +13,23 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin:     func(r *http.Request) bool { return true }, // TODO: restrict in prod
+	CheckOrigin:     checkOrigin,
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
+}
+
+// checkOrigin allows only requests where the Origin matches the Host header.
+// This prevents cross-site WebSocket hijacking from other browser tabs.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// No Origin header — allow (non-browser clients, curl, etc.)
+		return true
+	}
+	// Strip scheme from origin and compare to Host
+	origin = strings.TrimPrefix(origin, "https://")
+	origin = strings.TrimPrefix(origin, "http://")
+	return origin == r.Host
 }
 
 // EventType classifies WebSocket messages so the frontend can route them.

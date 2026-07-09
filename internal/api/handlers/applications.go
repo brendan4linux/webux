@@ -140,22 +140,27 @@ func (h *WebserversHandler) DisableSite(w http.ResponseWriter, r *http.Request) 
 // ─── Files ──────────────────────────────────────────────────────────────────
 
 type FilesHandler struct {
-	mgr   *files.Manager
 	learn *learn.Store
 }
 
 func NewFilesHandler(ls *learn.Store) *FilesHandler {
-	return &FilesHandler{mgr: files.NewManager(""), learn: ls}
+	return &FilesHandler{learn: ls}
 }
 
-// List handles GET /api/files?path=/etc
+// mgr returns a Manager configured for the current request.
+// Passes sudo=true when the caller sends ?sudo=true.
+func (h *FilesHandler) mgr(r *http.Request) *files.Manager {
+	return files.NewManager(r.URL.Query().Get("sudo") == "true")
+}
+
+// List handles GET /api/files?path=/etc[&sudo=true]
 func (h *FilesHandler) List(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = "/"
 	}
 	ctx := learn.WithContext(r.Context(), "files")
-	entries, err := h.mgr.List(path)
+	entries, err := h.mgr(r).List(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -164,11 +169,11 @@ func (h *FilesHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"entries": entries, "path": path})
 }
 
-// Read handles GET /api/files/read?path=/etc/nginx/nginx.conf
+// Read handles GET /api/files/read?path=/etc/nginx/nginx.conf[&sudo=true]
 func (h *FilesHandler) Read(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	ctx := learn.WithContext(r.Context(), "files")
-	data, err := h.mgr.Read(path)
+	data, err := h.mgr(r).Read(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -177,7 +182,7 @@ func (h *FilesHandler) Read(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"content": string(data), "path": path})
 }
 
-// Write handles PUT /api/files/write
+// Write handles PUT /api/files/write[?sudo=true]
 func (h *FilesHandler) Write(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path    string `json:"path"`
@@ -188,7 +193,7 @@ func (h *FilesHandler) Write(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Write(body.Path, body.Content)
+	cliCmd, err := h.mgr(r).Write(body.Path, body.Content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -197,11 +202,11 @@ func (h *FilesHandler) Write(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "cli_cmd": cliCmd})
 }
 
-// Delete handles DELETE /api/files?path=/tmp/foo
+// Delete handles DELETE /api/files?path=/tmp/foo[&sudo=true]
 func (h *FilesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Delete(path)
+	cliCmd, err := h.mgr(r).Delete(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -210,7 +215,7 @@ func (h *FilesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "cli_cmd": cliCmd})
 }
 
-// Mkdir handles POST /api/files/mkdir
+// Mkdir handles POST /api/files/mkdir[?sudo=true]
 func (h *FilesHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Path string `json:"path"` }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -218,7 +223,7 @@ func (h *FilesHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Mkdir(body.Path)
+	cliCmd, err := h.mgr(r).Mkdir(body.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -227,7 +232,7 @@ func (h *FilesHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "cli_cmd": cliCmd})
 }
 
-// Rename handles POST /api/files/rename
+// Rename handles POST /api/files/rename[?sudo=true]
 func (h *FilesHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		OldPath string `json:"old_path"`
@@ -238,7 +243,7 @@ func (h *FilesHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Rename(body.OldPath, body.NewPath)
+	cliCmd, err := h.mgr(r).Rename(body.OldPath, body.NewPath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -247,7 +252,7 @@ func (h *FilesHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "cli_cmd": cliCmd})
 }
 
-// Chmod handles POST /api/files/chmod
+// Chmod handles POST /api/files/chmod[?sudo=true]
 func (h *FilesHandler) Chmod(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path string `json:"path"`
@@ -258,7 +263,7 @@ func (h *FilesHandler) Chmod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Chmod(body.Path, body.Mode)
+	cliCmd, err := h.mgr(r).Chmod(body.Path, body.Mode)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -267,7 +272,7 @@ func (h *FilesHandler) Chmod(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "cli_cmd": cliCmd})
 }
 
-// Upload handles POST /api/files/upload?path=/tmp/
+// Upload handles POST /api/files/upload?path=/tmp/[&sudo=true]
 func (h *FilesHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("path")
 	if dir == "" {
@@ -284,13 +289,12 @@ func (h *FilesHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Sanitise filename
 	safeName := filepath.Base(header.Filename)
 	safeName = strings.ReplaceAll(safeName, "..", "")
 	dest := filepath.Join(dir, safeName)
 
 	ctx := learn.WithContext(r.Context(), "files")
-	cliCmd, err := h.mgr.Upload(dest, file)
+	cliCmd, err := h.mgr(r).Upload(dest, file)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -299,10 +303,10 @@ func (h *FilesHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "path": dest, "cli_cmd": cliCmd})
 }
 
-// Download handles GET /api/files/download?path=/etc/hosts
+// Download handles GET /api/files/download?path=/etc/hosts[&sudo=true]
 func (h *FilesHandler) Download(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
-	data, err := h.mgr.Read(path)
+	data, err := h.mgr(r).Read(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

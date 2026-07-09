@@ -8,20 +8,27 @@ import (
 
 // Config holds all runtime configuration for Webux.
 type Config struct {
-	ListenAddr  string     `yaml:"listen_addr"`
-	DataDir     string     `yaml:"data_dir"`
-	TLSCertFile string     `yaml:"tls_cert_file"`
-	TLSKeyFile  string     `yaml:"tls_key_file"`
-	LogLevel    string     `yaml:"log_level"`
-	LearnMode   bool       `yaml:"learn_mode"`
-	Auth        AuthConfig `yaml:"auth"`
+	ListenAddr  string      `yaml:"listen_addr"`
+	DataDir     string      `yaml:"data_dir"`
+	TLSCertFile string      `yaml:"tls_cert_file"`
+	TLSKeyFile  string      `yaml:"tls_key_file"`
+	LogLevel    string      `yaml:"log_level"`
+	LearnMode   bool        `yaml:"learn_mode"`
+	Auth        AuthConfig  `yaml:"auth"`
+	Files       FilesConfig `yaml:"files"`
+}
+
+// FilesConfig restricts the file manager to a subtree.
+type FilesConfig struct {
+	// Root is the top-level directory the file manager may access.
+	// Defaults to /home. Set to / only if you understand the implications.
+	Root string `yaml:"root"`
 }
 
 // AuthConfig holds authentication settings.
 type AuthConfig struct {
-	// BypassToken — when set, requests with ?token=<value> or
-	// X-Webux-Token: <value> header skip authentication entirely.
-	// Use a long random string (32+ chars). Store securely.
+	// BypassToken — when set, requests with X-Webux-Token: <value> header
+	// skip authentication entirely. Use a long random string (32+ chars).
 	// Example: openssl rand -hex 32
 	BypassToken string `yaml:"bypass_token"`
 
@@ -31,6 +38,12 @@ type AuthConfig struct {
 
 	// Disabled — set to true to turn off all authentication (development only).
 	Disabled bool `yaml:"disabled"`
+
+	// AllowedUsers — if non-empty, only these Unix usernames may log in.
+	// Any PAM/shadow-authenticated account NOT in this list is rejected
+	// even with correct credentials. Recommended for multi-user hosts.
+	// Example: ["bdubs", "ops-team"]
+	AllowedUsers []string `yaml:"allowed_users"`
 }
 
 // Load reads config from a YAML file, then overlays environment variables.
@@ -70,5 +83,6 @@ func defaults() *Config {
 		DataDir:    "/var/lib/webux",
 		LogLevel:   "info",
 		LearnMode:  true,
+		Files:      FilesConfig{Root: "/home"},
 	}
 }

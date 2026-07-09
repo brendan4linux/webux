@@ -24,6 +24,24 @@
   let queryError = $state('');
   let querying = $state(false);
 
+  interface SvcCheck { id: string; label: string; pass: boolean; detail: string; fix: string; severity: string; }
+  let secChecks = $state<SvcCheck[]>([]);
+  let secLoading = $state(false);
+  let secError = $state('');
+  let secLoaded = $state(false);
+
+  async function loadSecurity() {
+    secLoading = true; secError = ''; secLoaded = false;
+    try {
+      const res = await fetch('/api/databases/security');
+      if (!res.ok) throw new Error(await res.text());
+      const d = await res.json();
+      secChecks = d.checks ?? [];
+      secLoaded = true;
+    } catch(e: any) { secError = e.message; }
+    finally { secLoading = false; }
+  }
+
   async function load() {
     loading = true; error = '';
     try {
@@ -223,6 +241,35 @@
     {/if}
   </div>
 
+  <!-- MySQL/MariaDB security checks -->
+  {#if instances.some(i => i.driver === 'mysql' || i.driver === 'mariadb')}
+    <div class="sec-section">
+      <div class="sec-header">
+        <span class="sec-title">🔒 MySQL/MariaDB Security</span>
+        <button class="btn btn-ghost" style="font-size:0.78rem" onclick={loadSecurity} disabled={secLoading}>
+          {secLoading ? '…' : secLoaded ? '⟳ Refresh' : 'Run checks'}
+        </button>
+      </div>
+      {#if secError}<div class="alert alert-error">{secError}</div>
+      {:else if secLoaded}
+        <div class="card" style="padding:0">
+          {#each secChecks as c (c.id)}
+            <div class="sec-row" class:sec-pass={c.pass} class:sec-fail={!c.pass}>
+              <span class="sec-icon">{c.pass ? '✓' : '✗'}</span>
+              <div class="sec-body">
+                <div class="sec-label">{c.label}
+                  <span class="badge badge-{c.severity === 'high' ? 'red' : c.severity === 'medium' ? 'yellow' : 'gray'}" style="margin-left:0.375rem;font-size:0.65rem">{c.severity}</span>
+                </div>
+                <div class="sec-detail">{c.pass ? c.detail : c.fix}</div>
+                {#if !c.pass && c.detail}<div class="sec-found">Found: {c.detail}</div>{/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   <CLIEchoPane context="databases" />
 </div>
 
@@ -244,4 +291,17 @@
 .result-wrap { border:1px solid var(--border-subtle); border-radius:var(--r-md); overflow:hidden; }
 .result-table { font-size:0.75rem; }
 .result-table td { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sec-section { margin-top:1.25rem; }
+.sec-header { display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; }
+.sec-title { font-size:0.9rem; font-weight:600; color:var(--text-primary); }
+.sec-row { display:flex; align-items:flex-start; gap:0.75rem; padding:0.75rem 1rem; border-bottom:1px solid var(--border-subtle); }
+.sec-row:last-child { border-bottom:none; }
+.sec-icon { font-size:0.85rem; font-weight:700; width:16px; flex-shrink:0; margin-top:0.1rem; }
+.sec-pass .sec-icon { color:var(--accent); }
+.sec-fail .sec-icon { color:#f87171; }
+.sec-body { flex:1; min-width:0; }
+.sec-label { font-size:0.82rem; font-weight:500; color:var(--text-primary); display:flex; align-items:center; flex-wrap:wrap; gap:0.25rem; }
+.sec-fail .sec-label { color:#f87171; }
+.sec-detail { font-size:0.74rem; color:var(--text-secondary); margin-top:0.2rem; }
+.sec-found { font-size:0.7rem; color:var(--text-tertiary); margin-top:0.15rem; font-style:italic; }
 </style>

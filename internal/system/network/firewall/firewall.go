@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -349,39 +350,69 @@ func parseNFTRules(lines []string) []Rule {
 	return rules
 }
 
+var (
+	nftIdentRe         = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	nftPortRe          = regexp.MustCompile(`^\d{1,5}(-\d{1,5})?$`)
+	nftAllowedActions  = map[string]bool{"accept": true, "drop": true, "reject": true}
+	nftAllowedProtos   = map[string]bool{"tcp": true, "udp": true, "ip": true, "ip6": true, "inet": true}
+)
+
 func (m *Manager) nftAdd(rule Rule) (string, error) {
-	// Build a basic nft rule — simplified for common cases
-	proto := rule.Protocol
+	proto := strings.ToLower(rule.Protocol)
 	if proto == "" {
 		proto = "tcp"
 	}
+	if !nftAllowedProtos[proto] {
+		return "", fmt.Errorf("nft: invalid protocol %q", proto)
+	}
+
 	table := rule.Table
 	if table == "" {
-		table = "inet filter"
+		table = "filter"
 	}
+	tableFamily := "inet"
+	// table may be "inet filter" — split if so
+	if parts := strings.Fields(table); len(parts) == 2 {
+		tableFamily = parts[0]
+		table = parts[1]
+	}
+	if !nftIdentRe.MatchString(tableFamily) {
+		return "", fmt.Errorf("nft: invalid table family %q", tableFamily)
+	}
+	if !nftIdentRe.MatchString(table) {
+		return "", fmt.Errorf("nft: invalid table name %q", table)
+	}
+
 	chain := rule.Chain
 	if chain == "" {
-		chain = "INPUT"
+		chain = "input"
 	}
+	if !nftIdentRe.MatchString(chain) {
+		return "", fmt.Errorf("nft: invalid chain name %q", chain)
+	}
+
 	action := strings.ToLower(rule.Action)
 	if action == "" {
 		action = "accept"
 	}
-
-	var expr string
-	if rule.Port != "" {
-		expr = fmt.Sprintf("%s dport %s %s", proto, rule.Port, action)
-	} else {
-		expr = action
+	if !nftAllowedActions[action] {
+		return "", fmt.Errorf("nft: invalid action %q", action)
 	}
 
-	cmd := fmt.Sprintf("nft add rule %s %s %s", table, chain, expr)
-	args := append(strings.Fields("add rule"), append(strings.Fields(table), strings.Fields(chain+expr)...)...)
+	if rule.Port != "" && !nftPortRe.MatchString(rule.Port) {
+		return "", fmt.Errorf("nft: invalid port %q", rule.Port)
+	}
+
+	// Build structured argv — no shell involved
+	args := []string{"add", "rule", tableFamily, table, chain}
+	if rule.Port != "" {
+		args = append(args, proto, "dport", rule.Port)
+	}
+	args = append(args, action)
+
+	cmd := "nft " + strings.Join(args, " ")
 	if err := exec.Command("nft", args...).Run(); err != nil {
-		// Fall back to string-based exec
-		if err2 := exec.Command("sh", "-c", cmd).Run(); err2 != nil {
-			return "", fmt.Errorf("nft add rule: %w", err)
-		}
+		return "", fmt.Errorf("nft add rule: %w", err)
 	}
 	return cmd, nil
 }

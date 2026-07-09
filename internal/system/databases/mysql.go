@@ -6,10 +6,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 )
+
+var dbNameRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 type mysqlDB struct {
 	db *sql.DB
@@ -53,6 +56,9 @@ func (m *mysqlDB) ListDatabases(ctx context.Context) ([]string, error) {
 }
 
 func (m *mysqlDB) ListTables(ctx context.Context, database string) ([]string, error) {
+	if !dbNameRe.MatchString(database) {
+		return nil, fmt.Errorf("invalid database name %q", database)
+	}
 	rows, err := m.db.QueryContext(ctx, "SHOW TABLES IN `"+database+"`")
 	if err != nil {
 		return nil, err
@@ -80,6 +86,9 @@ func (m *mysqlDB) Query(ctx context.Context, database, query string) (*QueryResu
 
 allowed:
 	if database != "" {
+		if !dbNameRe.MatchString(database) {
+			return &QueryResult{Error: fmt.Sprintf("invalid database name %q", database)}, nil
+		}
 		if _, err := m.db.ExecContext(ctx, "USE `"+database+"`"); err != nil {
 			return nil, err
 		}

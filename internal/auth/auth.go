@@ -1,75 +1,112 @@
 // Package auth provides authentication for Webux.
 // Supports PAM (with -tags pam + CGO), /etc/shadow fallback (default),
-// JWT session tokens, and a configurable SSO bypass token.
+// JWT session tokens, server-side revocation, and a configurable SSO bypass token.
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
 )
+
+type contextKey string
+
+const claimsContextKey contextKey = "webux_claims"
+
+// ClaimsFromContext returns the authenticated user's claims from the request context,
+// or nil if the request is unauthenticated (e.g. SSO bypass or auth disabled).
+func ClaimsFromContext(ctx context.Context) *Claims {
+	v, _ := ctx.Value(claimsContextKey).(*Claims)
+	return v
+}
 
 // ── JWT ──────────────────────────────────────────────────────────────────
 
 const (
-	jwtHeader    = `{"alg":"HS256","typ":"JWT"}`
+	jwtHeader     = `{"alg":"HS256","typ":"JWT"}`
 	sessionCookie = "webux_session"
-	sessionTTL   = 24 * time.Hour
+	sessionTTL    = 24 * time.Hour
 )
 
 // Claims is the JWT payload.
 type Claims struct {
-	Username string `json:"sub"`
-	IssuedAt int64  `json:"iat"`
-	ExpiresAt int64 `json:"exp"`
+	Username  string `json:"sub"`
+	JTI       string `json:"jti"` // session ID — used for server-side revocation
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+}
+
+// ManagerConfig configures the auth Manager.
+type ManagerConfig struct {
+	JWTSecret    []byte
+	BypassToken  string
+	DB           *sql.DB  // required for server-side session revocation
+	AllowedUsers []string // if non-empty, only these usernames may authenticate
 }
 
 // Manager handles authentication and session management.
 type Manager struct {
-	jwtSecret   []byte
-	bypassToken string // empty = disabled
+	jwtSecret    []byte
+	bypassToken  string
+	db           *sql.DB
+	allowedUsers map[string]bool
 }
 
 // NewManager creates an auth manager.
-// jwtSecret should be a random 32+ byte value loaded from config/DB.
-// bypassToken is the SSO bypass token from config (empty = disabled).
-func NewManager(jwtSecret []byte, bypassToken string) *Manager {
-	if len(jwtSecret) == 0 {
-		// Generate ephemeral secret — sessions won't survive restarts,
-		// but better than panicking.
-		jwtSecret = make([]byte, 32)
-		rand.Read(jwtSecret)
+func NewManager(cfg ManagerConfig) *Manager {
+	if len(cfg.JWTSecret) == 0 {
+		cfg.JWTSecret = make([]byte, 32)
+		rand.Read(cfg.JWTSecret)
+		log.Printf("WARN: webux auth: no jwt_secret configured — using ephemeral key; sessions will not survive restarts and will not be shared across instances")
+	}
+	allowed := make(map[string]bool, len(cfg.AllowedUsers))
+	for _, u := range cfg.AllowedUsers {
+		allowed[u] = true
 	}
 	return &Manager{
-		jwtSecret:   jwtSecret,
-		bypassToken: bypassToken,
+		jwtSecret:    cfg.JWTSecret,
+		bypassToken:  cfg.BypassToken,
+		db:           cfg.DB,
+		allowedUsers: allowed,
 	}
 }
 
-// Login authenticates the user and sets a JWT cookie.
-// Returns the signed token on success.
+// Login authenticates the user, checks the allow-list, and returns a signed token.
 func (m *Manager) Login(username, password string) (string, error) {
 	if err := AuthenticatePAM(username, password); err != nil {
 		return "", err
 	}
+	if len(m.allowedUsers) > 0 && !m.allowedUsers[username] {
+		return "", fmt.Errorf("user %q is not permitted to access this panel", username)
+	}
 	return m.issueToken(username)
 }
 
-// issueToken creates a signed JWT for the given username.
+// issueToken creates a signed JWT and persists the session in the DB.
 func (m *Manager) issueToken(username string) (string, error) {
+	jti, err := generateID()
+	if err != nil {
+		return "", fmt.Errorf("session id: %w", err)
+	}
 	now := time.Now()
+	exp := now.Add(sessionTTL)
 	claims := Claims{
 		Username:  username,
+		JTI:       jti,
 		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(sessionTTL).Unix(),
+		ExpiresAt: exp.Unix(),
 	}
 	header64 := base64.RawURLEncoding.EncodeToString([]byte(jwtHeader))
 	claimsJSON, err := json.Marshal(claims)
@@ -78,7 +115,19 @@ func (m *Manager) issueToken(username string) (string, error) {
 	}
 	claims64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
 	sig := m.sign(header64 + "." + claims64)
-	return header64 + "." + claims64 + "." + sig, nil
+	token := header64 + "." + claims64 + "." + sig
+
+	// Persist session for revocation support
+	if m.db != nil {
+		m.db.Exec(
+			`INSERT INTO webux_sessions (jti, username, expires_at) VALUES (?, ?, datetime(?, 'unixepoch'))`,
+			jti, username, exp.Unix(),
+		)
+		// Prune expired sessions opportunistically
+		m.db.Exec(`DELETE FROM webux_sessions WHERE expires_at < datetime('now')`)
+	}
+
+	return token, nil
 }
 
 func (m *Manager) sign(payload string) string {
@@ -88,6 +137,7 @@ func (m *Manager) sign(payload string) string {
 }
 
 // Verify validates a JWT token string and returns the claims.
+// Also checks the session is still active in the DB (not revoked by logout).
 func (m *Manager) Verify(token string) (*Claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -108,22 +158,54 @@ func (m *Manager) Verify(token string) (*Claims, error) {
 	if time.Now().Unix() > claims.ExpiresAt {
 		return nil, fmt.Errorf("token expired")
 	}
+	// Server-side revocation check — if a session was logged out, its JTI is gone
+	if m.db != nil && claims.JTI != "" {
+		var count int
+		m.db.QueryRow(
+			`SELECT COUNT(*) FROM webux_sessions WHERE jti = ? AND expires_at > datetime('now')`,
+			claims.JTI,
+		).Scan(&count)
+		if count == 0 {
+			return nil, fmt.Errorf("session revoked or expired")
+		}
+	}
 	return &claims, nil
 }
 
-// SetCookie writes the JWT as an HttpOnly cookie on the response.
+// RevokeSession deletes the session from the DB, invalidating the token immediately.
+func (m *Manager) RevokeSession(token string) {
+	if m.db == nil {
+		return
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return
+	}
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return
+	}
+	var claims Claims
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil || claims.JTI == "" {
+		return
+	}
+	m.db.Exec(`DELETE FROM webux_sessions WHERE jti = ?`, claims.JTI)
+}
+
+// SetCookie writes the JWT as an HttpOnly, Secure cookie on the response.
 func (m *Manager) SetCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
 }
 
-// ClearCookie removes the session cookie.
+// ClearCookie removes the session cookie from the browser.
 func (m *Manager) ClearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -139,37 +221,32 @@ func (m *Manager) TokenFromRequest(r *http.Request) string {
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
 		return cookie.Value
 	}
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	a := r.Header.Get("Authorization")
+	if strings.HasPrefix(a, "Bearer ") {
+		return strings.TrimPrefix(a, "Bearer ")
 	}
 	return ""
 }
 
-// Middleware returns an HTTP middleware that enforces authentication.
-// Only /api/* and /ws* paths require a valid JWT — the SPA (HTML/JS/CSS)
-// is always served so the frontend can show the login screen itself.
+// Middleware returns an HTTP middleware that enforces authentication and emits audit logs.
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Always allow: auth endpoints, static assets, SPA shell
 		if isPublicPath(path) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Only enforce auth on API and WebSocket paths
-		// Everything else (root, /, /index.html) serves the SPA freely
 		if !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/ws") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// SSO bypass token check
+		// SSO bypass token — header only, constant-time comparison
 		if m.bypassToken != "" {
-			if r.URL.Query().Get("token") == m.bypassToken ||
-				r.Header.Get("X-Webux-Token") == m.bypassToken {
+			provided := r.Header.Get("X-Webux-Token")
+			if subtle.ConstantTimeCompare([]byte(provided), []byte(m.bypassToken)) == 1 {
 				token, err := m.issueToken("sso")
 				if err == nil {
 					m.SetCookie(w, token)
@@ -185,13 +262,31 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 			redirectToLogin(w, r)
 			return
 		}
-		if _, err := m.Verify(token); err != nil {
+		claims, err := m.Verify(token)
+		if err != nil {
 			m.ClearCookie(w)
 			redirectToLogin(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// Allow-list check
+		if len(m.allowedUsers) > 0 && !m.allowedUsers[claims.Username] {
+			slog.Warn("audit: access denied — user not in allowed_users",
+				"user", claims.Username, "ip", r.RemoteAddr, "path", path)
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+
+		// Audit log — every authenticated API/WS request
+		slog.Info("audit",
+			"user", claims.Username,
+			"method", r.Method,
+			"path", path,
+			"ip", r.RemoteAddr,
+		)
+
+		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -200,6 +295,14 @@ func GenerateSecret() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func generateID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // BuildInfo returns a string describing the active auth backend.
@@ -228,15 +331,6 @@ func isPublicPath(path string) bool {
 }
 
 func redirectToLogin(w http.ResponseWriter, r *http.Request) {
-	// API and WebSocket calls get 401 JSON — never redirect these
-	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
-		w.Header().Set("Content-Type", "application/json")
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	// Static assets and the SPA root get served normally — the SPA itself
-	// handles showing the login screen when /auth/whoami returns 401.
-	// Never redirect the root or asset paths — that causes infinite loops
-	// because the # fragment is never sent to the server.
+	w.Header().Set("Content-Type", "application/json")
 	http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 }
