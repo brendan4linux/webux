@@ -84,8 +84,11 @@ build-pam: web
 	@echo "✓ $(OUT_DIR)/$(BINARY)-pam (requires libpam on target system)"
 
 
-# These skip the 'web' dependency — run 'make web' first once, then
-# 'make release' to cross-compile all arches without rebuilding the frontend.
+# Cross-compile targets reuse the already-built cmd/webux/dist.
+# The 'release' and 'release-full' meta-targets depend on 'web' to ensure
+# the frontend is always up-to-date before embedding. Individual per-arch
+# targets (release-amd64 etc.) skip 'web' so CI can build them in parallel
+# after a single 'make web' step.
 
 _build_cross:
 	@mkdir -p $(OUT_DIR)/release
@@ -119,16 +122,16 @@ release-386:
 		GOOS=linux GOARCH=386 GOARM= \
 		OUT_BINARY=$(OUT_DIR)/release/$(BINARY)-linux-386
 
-## release: Cross-compile for all architectures (run 'make web' first)
-release: release-amd64 release-arm64 release-armv7 release-386
+## release: Build frontend then cross-compile for all architectures
+release: web release-amd64 release-arm64 release-armv7 release-386
 	@echo ""
 	@echo "✓ Release binaries:"
 	@ls -lh $(OUT_DIR)/release/
 	@echo ""
 	@echo "Next: make package   (requires fpm: gem install fpm)"
 
-## release-full: Cross-compile with all DB drivers for all arches
-release-full:
+## release-full: Build frontend then cross-compile with all DB drivers for all arches
+release-full: web
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "mysql postgres" \
 		-ldflags "$(LDFLAGS)" -trimpath \
 		-o $(OUT_DIR)/release/webux-full-linux-amd64 $(CMD_DIR)
