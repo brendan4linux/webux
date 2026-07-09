@@ -187,10 +187,10 @@
           </div>
           {#if bypassToken}
             <div class="field-hint">
-              SSO URL: <code class="mono" style="font-size:0.68rem">https://yourserver:8989/auth/bypass?token={bypassToken}</code>
+              Send header: <code class="mono" style="font-size:0.68rem">X-Webux-Token: {bypassToken}</code>
             </div>
           {:else}
-            <span class="field-hint">Your SSO system can redirect to <code class="mono">/?token=&lt;token&gt;</code> to bypass login</span>
+            <span class="field-hint">Your SSO system must pass the token via the <code class="mono">X-Webux-Token</code> request header</span>
           {/if}
         </div>
       </div>

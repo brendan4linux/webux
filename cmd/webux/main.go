@@ -104,7 +104,12 @@ func main() {
 		database.QueryRow("SELECT value FROM webux_settings WHERE key='auth.bypass_token'").Scan(&bypassToken)
 	}
 
-	authMgr := auth.NewManager([]byte(jwtSecret), bypassToken)
+	authMgr := auth.NewManager(auth.ManagerConfig{
+		JWTSecret:    []byte(jwtSecret),
+		BypassToken:  bypassToken,
+		DB:           database,
+		AllowedUsers: cfg.Auth.AllowedUsers,
+	})
 
 	hostInfo, err := system.Detect()
 	if err != nil {

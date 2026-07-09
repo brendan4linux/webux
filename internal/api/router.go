@@ -144,7 +144,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Get("/containers/{id}/logs", ctrH.Logs)
 		r.Get("/containers/{id}/stats", ctrH.Stats)
 		r.Get("/containers/images", ctrH.ListImages)
-		r.Post("/api/containers/run", ctrH.Run)
+		r.Post("/containers/run", ctrH.Run)
 
 		// Databases
 		dbH := handlers.NewDatabasesHandler(learnStore)

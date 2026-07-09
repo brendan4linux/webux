@@ -3,6 +3,9 @@ package packages
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -467,31 +470,81 @@ func addPacmanRepo(name, url string) (string, error) {
 	return fmt.Sprintf("# Added [%s] to /etc/pacman.conf", name), nil
 }
 
-func addAptRepo(name, url, keyURL string) (string, error) {
+func addAptRepo(name, repoURL, keyURL string) (string, error) {
 	var cliParts []string
 
-	// Import GPG key if provided
+	// Import GPG key if provided — fetch in Go, pipe to gpg via argv (no shell)
 	if keyURL != "" {
+		if err := validateHTTPSURL(keyURL); err != nil {
+			return "", fmt.Errorf("invalid key URL: %w", err)
+		}
 		keyPath := fmt.Sprintf("/etc/apt/keyrings/%s.gpg", sanitiseRepoName(name))
-		if err := exec.Command("sh", "-c",
-			fmt.Sprintf("curl -fsSL %s | gpg --dearmor -o %s", keyURL, keyPath)).Run(); err != nil {
+		if err := fetchAndDearmor(keyURL, keyPath); err != nil {
 			// Non-fatal — key might already be installed
+			_ = err
 		}
 		cliParts = append(cliParts,
-			fmt.Sprintf("curl -fsSL %s | gpg --dearmor -o /etc/apt/keyrings/%s.gpg",
-				keyURL, sanitiseRepoName(name)))
+			fmt.Sprintf("curl -fsSL '%s' | gpg --dearmor -o '%s'", keyURL, keyPath))
 	}
 
+	// Validate repo URL and strip newlines before writing (L3)
+	repoURL = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, repoURL)
+
 	listPath := fmt.Sprintf("/etc/apt/sources.list.d/%s.list", sanitiseRepoName(name))
-	line := fmt.Sprintf("deb %s\n", url)
+	line := fmt.Sprintf("deb %s\n", repoURL)
 	if err := os.WriteFile(listPath, []byte(line), 0644); err != nil {
 		return "", fmt.Errorf("write sources list: %w", err)
 	}
 	cliParts = append(cliParts,
-		fmt.Sprintf("echo 'deb %s' > %s", url, listPath),
+		fmt.Sprintf("echo 'deb %s' > %s", repoURL, listPath),
 		"apt-get update")
 
 	return strings.Join(cliParts, "\n"), nil
+}
+
+// validateHTTPSURL ensures a URL is well-formed and uses http or https.
+func validateHTTPSURL(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return fmt.Errorf("malformed URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https, got %q", u.Scheme)
+	}
+	return nil
+}
+
+// fetchAndDearmor downloads a GPG key via Go's HTTP client and dearmors it
+// using gpg argv (no shell). Safe against injection in keyURL.
+func fetchAndDearmor(keyURL, destPath string) error {
+	resp, err := http.Get(keyURL) //nolint:gosec // URL already validated by validateHTTPSURL
+	if err != nil {
+		return fmt.Errorf("fetch key: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("fetch key: HTTP %d", resp.StatusCode)
+	}
+
+	// Pipe response body to gpg --dearmor via argv (not sh -c)
+	tmp, err := os.CreateTemp("", "webux-key-*.asc")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		return fmt.Errorf("write temp key: %w", err)
+	}
+	tmp.Close()
+
+	return exec.Command("gpg", "--dearmor", "-o", destPath, tmp.Name()).Run()
 }
 
 func addDNFRepo(name, url, keyURL, backend string) (string, error) {

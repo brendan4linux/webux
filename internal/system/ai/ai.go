@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -60,11 +62,70 @@ type Client struct {
 	http   *http.Client
 }
 
+var ssrfBlockedCIDRs []*net.IPNet
+
+func init() {
+	// Block private/link-local ranges that must not be reachable via user-supplied URLs.
+	// Loopback (127.x, ::1) is allowed — Ollama runs on localhost by default.
+	for _, cidr := range []string{
+		"169.254.0.0/16", // IPv4 link-local (AWS metadata, etc.)
+		"fc00::/7",       // IPv6 unique-local
+		"fe80::/10",      // IPv6 link-local
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+	} {
+		_, network, _ := net.ParseCIDR(cidr)
+		if network != nil {
+			ssrfBlockedCIDRs = append(ssrfBlockedCIDRs, network)
+		}
+	}
+}
+
+func ssrfSafeDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip == nil {
+			continue
+		}
+		for _, blocked := range ssrfBlockedCIDRs {
+			if blocked.Contains(ip) {
+				return nil, fmt.Errorf("SSRF protection: connection to %s (%s) is not allowed", host, ip)
+			}
+		}
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, network, net.JoinHostPort(addrs[0], port))
+}
+
 func NewClient(cfg Config) *Client {
+	transport := &http.Transport{
+		DialContext: ssrfSafeDial,
+	}
 	return &Client{
 		cfg:  cfg,
-		http: &http.Client{Timeout: 120 * time.Second},
+		http: &http.Client{Timeout: 120 * time.Second, Transport: transport},
 	}
+}
+
+// validateAIURL checks that a user-supplied URL has an http/https scheme.
+func validateAIURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https, got %q", u.Scheme)
+	}
+	return nil
 }
 
 // ── Ollama management ─────────────────────────────────────────────────────
