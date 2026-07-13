@@ -9,7 +9,8 @@
         { href: '#/services', icon: '⚙', label: 'Services' },
         { href: '#/processes', icon: '◈', label: 'Processes' },
         { href: '#/disks',     icon: '◫', label: 'Disks' },
-        { href: '#/users', icon: '◉', label: 'Users' },
+        { href: '#/users',     icon: '◉', label: 'Users' },
+        { href: '#/logs',      icon: '≡', label: 'Logs' },
       ]
     },
     {

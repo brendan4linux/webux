@@ -23,6 +23,7 @@
   import Ansible from './routes/Ansible.svelte';
   import AIAssistant from './routes/AIAssistant.svelte';
   import Disks from './routes/Disks.svelte';
+  import Logs from './routes/Logs.svelte';
   import Settings from './routes/Settings.svelte';
   import Login from './routes/Login.svelte';
   import NotFound from './routes/NotFound.svelte';
@@ -70,6 +71,7 @@
     '#/ansible':    Ansible,
     '#/ai':         AIAssistant,
     '#/disks':      Disks,
+    '#/logs':       Logs,
     '#/settings':   Settings,
   };
 

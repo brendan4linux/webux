@@ -278,6 +278,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 			writeJSON(w, map[string]interface{}{"ok": true})
 		})
 
+		// Logs
+		logsH := handlers.NewLogsHandler()
+		r.Get("/logs/files", logsH.List)
+		r.Get("/logs/read", logsH.Read)
+		r.Get("/logs/follow", logsH.Follow)
+		r.Get("/logs/systemd/units", logsH.Units)
+		r.Get("/logs/systemd/follow", logsH.FollowUnit)
+
 		// Migration
 		migH := handlers.NewMigrationHandler(learnStore)
 		r.Get("/migration/snapshot", migH.Snapshot)
