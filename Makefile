@@ -146,8 +146,10 @@ checksums:
 # Requires fpm: gem install fpm
 # Produces .deb, .rpm, .tar.gz for each architecture
 
-# Helper: find binary for a given arch — accepts both plain and -full- variants
-_find_binary = $(firstword $(wildcard 	$(OUT_DIR)/release/$(BINARY)-linux-$(1) 	$(OUT_DIR)/release/$(BINARY)-full-linux-$(1)))
+# Helper: find binary for a given arch — prefers plain binary over -full- variant.
+# Uses $(or ...) with separate $(wildcard) calls so alphabetical glob ordering
+# cannot cause the -full- binary to shadow the standard one.
+_find_binary = $(or $(wildcard $(OUT_DIR)/release/$(BINARY)-linux-$(1)),$(wildcard $(OUT_DIR)/release/$(BINARY)-full-linux-$(1)))
 
 package-amd64:
 	@$(eval BIN := $(call _find_binary,amd64))

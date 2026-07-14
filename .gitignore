@@ -1,0 +1,27 @@
+# Build outputs — never commit binaries or packages
+build/
+
+# Frontend build outputs (embedded into Go binary at build time)
+web/dist/
+cmd/webux/dist/
+
+# Node
+web/node_modules/
+
+# Go tool cache
+*.test
+*.out
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev data dirs
+/tmp/webux-data/
+*.db

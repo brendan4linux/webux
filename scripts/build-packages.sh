@@ -84,11 +84,13 @@ for ARCH in amd64 arm64 armv7; do
             warn "[$ARCH] No binary found in $BUILD/ — run: make build-pam"
         fi
     else
-        # Cross-compiled arch: must exist in release/
-        if [ -f "$RELEASE/webux-full-linux-$ARCH" ]; then
+        # Cross-compiled arch: prefer standard binary, fall back to -full-
+        if [ -f "$RELEASE/webux-linux-$ARCH" ]; then
             success "[$ARCH] Found cross-compiled binary"
+        elif [ -f "$RELEASE/webux-full-linux-$ARCH" ]; then
+            success "[$ARCH] Found cross-compiled full binary"
         else
-            warn "[$ARCH] No cross-compiled binary — run: make release-full"
+            warn "[$ARCH] No cross-compiled binary — run: make release"
             warn "       Skipping $ARCH packages"
         fi
     fi
@@ -97,7 +99,12 @@ done
 # ── Package function ──────────────────────────────────────────────────────
 package_arch() {
     ARCH="$1"
-    BINARY="$RELEASE/webux-full-linux-$ARCH"
+    # Prefer standard binary; fall back to -full- variant
+    if [ -f "$RELEASE/webux-linux-$ARCH" ]; then
+        BINARY="$RELEASE/webux-linux-$ARCH"
+    else
+        BINARY="$RELEASE/webux-full-linux-$ARCH"
+    fi
 
     [ -f "$BINARY" ] || { warn "Skipping $ARCH — no binary"; return 0; }
     success "Packaging $ARCH ($(du -sh "$BINARY" | cut -f1))"
