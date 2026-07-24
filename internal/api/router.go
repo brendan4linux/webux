@@ -100,6 +100,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Get("/hardening", hardeningH.Get)
 		r.Post("/hardening/refresh", hardeningH.Refresh)
 
+		// Performance tuning score
+		perfH := handlers.NewPerformanceHandler(cfg.DB)
+		r.Get("/performance", perfH.Get)
+		r.Post("/performance/refresh", perfH.Refresh)
+
 		// Users & groups
 		usersH := handlers.NewUsersHandler(learnStore)
 		r.Get("/users", usersH.ListUsers)

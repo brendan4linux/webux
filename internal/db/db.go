@@ -39,6 +39,9 @@ var migration009 string
 //go:embed migrations/010_fix_sessions.sql
 var migration010 string
 
+//go:embed migrations/011_performance.sql
+var migration011 string
+
 // Open opens (or creates) the Webux SQLite database.
 func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", path+"?_journal=WAL&_timeout=5000&_fk=true")
@@ -72,6 +75,7 @@ func Migrate(db *sql.DB) error {
 		{8, migration008},
 		{9, migration009},
 		{10, migration010},
+		{11, migration011},
 	}
 
 	for _, m := range migrations {

@@ -86,7 +86,7 @@
       <h1>Migration Template</h1>
       <p class="subtitle">Capture everything that needs to move when you replace this host</p>
     </div>
-    <a class="btn-secondary" href="/ports">← Open Ports</a>
+    <a class="btn-secondary" href="#/ports">← Open Ports</a>
   </header>
 
   {#if error}

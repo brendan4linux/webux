@@ -171,7 +171,7 @@
           <span style="font-size:0.82rem;color:var(--text-secondary)">Full PAM — supports LDAP, 2FA, system accounts</span>
         {:else}
           <span class="badge badge-yellow">Shadow</span>
-          <span style="font-size:0.82rem;color:var(--text-secondary)">Using /etc/shadow + crypt(3)</span>
+          <span style="font-size:0.82rem;color:var(--text-secondary)">System auth via /etc/shadow — SSSD/LDAP also works if configured via PAM/NSS</span>
         {/if}
       </div>
       <div class="form-grid" style="margin-top:1rem">

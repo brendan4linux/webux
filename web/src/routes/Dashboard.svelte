@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import HealthChecks from '$components/HealthChecks.svelte';
   import HardeningScore from '$components/HardeningScore.svelte';
+  import PerformanceScore from '$components/PerformanceScore.svelte';
 
   let hostname    = $state('');
   let distro      = $state('');
@@ -224,6 +225,11 @@
     <HealthChecks />
     <HardeningScore />
   </div>
+
+  <!-- Row 5: Performance tuning (full width) -->
+  <div class="perf-row">
+    <PerformanceScore />
+  </div>
 </div>
 
 <style>
@@ -259,4 +265,5 @@
 .cap-inactive .cap-dot { background: var(--text-tertiary); box-shadow: none; }
 
 .health-row { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.perf-row { width: 100%; margin-top: 0.75rem; }
 </style>
