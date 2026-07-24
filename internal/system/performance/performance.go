@@ -22,6 +22,7 @@ type Result struct {
 	Check
 	Pass   bool   `json:"pass"`
 	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"` // suggested sysctl command, empty if no single-line fix
 }
 
 type Score struct {
@@ -70,8 +71,8 @@ func RunAll() *Score {
 		wg.Add(1)
 		go func(idx int, c Check) {
 			defer wg.Done()
-			pass, detail := runCheck(c.ID)
-			results[idx] = Result{Check: c, Pass: pass, Detail: detail}
+			pass, detail, fix := runCheck(c.ID)
+			results[idx] = Result{Check: c, Pass: pass, Detail: detail, Fix: fix}
 		}(i, ch)
 	}
 	wg.Wait()
@@ -158,141 +159,142 @@ func sysctlInt(key string) (int64, error) {
 	return strconv.ParseInt(v, 10, 64)
 }
 
-func runCheck(id string) (bool, string) {
+func runCheck(id string) (bool, string, string) {
 	switch id {
 	case "vm_swappiness":
 		v, err := sysctlInt("vm.swappiness")
 		if err != nil {
-			return false, "Cannot read vm.swappiness"
+			return false, "Cannot read vm.swappiness", ""
 		}
 		if v <= 30 {
-			return true, fmt.Sprintf("vm.swappiness = %d (≤ 30 — prefers RAM over swap)", v)
+			return true, fmt.Sprintf("vm.swappiness = %d (≤ 30 — prefers RAM over swap)", v), ""
 		}
-		return false, fmt.Sprintf("vm.swappiness = %d — set to ≤ 30 to prefer RAM: sysctl -w vm.swappiness=10", v)
+		return false, fmt.Sprintf("vm.swappiness = %d — set to ≤ 30 to prefer RAM over swap", v), "sysctl -w vm.swappiness=10"
 
 	case "vm_vfs_cache_pressure":
 		v, err := sysctlInt("vm.vfs_cache_pressure")
 		if err != nil {
-			return false, "Cannot read vm.vfs_cache_pressure"
+			return false, "Cannot read vm.vfs_cache_pressure", ""
 		}
 		if v <= 75 {
-			return true, fmt.Sprintf("vm.vfs_cache_pressure = %d (≤ 75 — retains inode/dentry cache longer)", v)
+			return true, fmt.Sprintf("vm.vfs_cache_pressure = %d (≤ 75 — retains inode/dentry cache longer)", v), ""
 		}
-		return false, fmt.Sprintf("vm.vfs_cache_pressure = %d — set to ≤ 75: sysctl -w vm.vfs_cache_pressure=50", v)
+		return false, fmt.Sprintf("vm.vfs_cache_pressure = %d — lower value retains inode/dentry cache longer", v), "sysctl -w vm.vfs_cache_pressure=50"
 
 	case "vm_dirty_background_ratio":
 		v, err := sysctlInt("vm.dirty_background_ratio")
 		if err != nil {
-			return false, "Cannot read vm.dirty_background_ratio"
+			return false, "Cannot read vm.dirty_background_ratio", ""
 		}
 		if v <= 10 {
-			return true, fmt.Sprintf("vm.dirty_background_ratio = %d%% (starts background writeback early)", v)
+			return true, fmt.Sprintf("vm.dirty_background_ratio = %d%% (starts background writeback early)", v), ""
 		}
-		return false, fmt.Sprintf("vm.dirty_background_ratio = %d%% — set to ≤ 10: sysctl -w vm.dirty_background_ratio=5", v)
+		return false, fmt.Sprintf("vm.dirty_background_ratio = %d%% — start background writeback earlier to avoid I/O spikes", v), "sysctl -w vm.dirty_background_ratio=5"
 
 	case "fs_file_max":
 		v, err := sysctlInt("fs.file-max")
 		if err != nil {
-			return false, "Cannot read fs.file-max"
+			return false, "Cannot read fs.file-max", ""
 		}
 		if v >= 2097152 {
-			return true, fmt.Sprintf("fs.file-max = %d (≥ 2097152 — high open-file limit)", v)
+			return true, fmt.Sprintf("fs.file-max = %d (≥ 2097152 — high open-file limit)", v), ""
 		}
-		return false, fmt.Sprintf("fs.file-max = %d — set to ≥ 2097152: sysctl -w fs.file-max=2097152", v)
+		return false, fmt.Sprintf("fs.file-max = %d — raise system-wide open file descriptor limit", v), "sysctl -w fs.file-max=2097152"
 
 	case "net_netdev_max_backlog":
 		v, err := sysctlInt("net.core.netdev_max_backlog")
 		if err != nil {
-			return false, "Cannot read net.core.netdev_max_backlog"
+			return false, "Cannot read net.core.netdev_max_backlog", ""
 		}
 		if v >= 5000 {
-			return true, fmt.Sprintf("net.core.netdev_max_backlog = %d (≥ 5000 — handles NIC bursts)", v)
+			return true, fmt.Sprintf("net.core.netdev_max_backlog = %d (≥ 5000 — handles NIC bursts)", v), ""
 		}
-		return false, fmt.Sprintf("net.core.netdev_max_backlog = %d — set to ≥ 5000: sysctl -w net.core.netdev_max_backlog=5000", v)
+		return false, fmt.Sprintf("net.core.netdev_max_backlog = %d — increase input queue to handle NIC traffic bursts", v), "sysctl -w net.core.netdev_max_backlog=5000"
 
 	case "net_somaxconn":
 		v, err := sysctlInt("net.core.somaxconn")
 		if err != nil {
-			return false, "Cannot read net.core.somaxconn"
+			return false, "Cannot read net.core.somaxconn", ""
 		}
 		if v >= 4096 {
-			return true, fmt.Sprintf("net.core.somaxconn = %d (≥ 4096 — large listen backlog)", v)
+			return true, fmt.Sprintf("net.core.somaxconn = %d (≥ 4096 — large listen backlog)", v), ""
 		}
-		return false, fmt.Sprintf("net.core.somaxconn = %d — set to ≥ 4096: sysctl -w net.core.somaxconn=4096", v)
+		return false, fmt.Sprintf("net.core.somaxconn = %d — increase listen backlog for busy servers", v), "sysctl -w net.core.somaxconn=4096"
 
 	case "net_tcp_max_syn_backlog":
 		v, err := sysctlInt("net.ipv4.tcp_max_syn_backlog")
 		if err != nil {
-			return false, "Cannot read net.ipv4.tcp_max_syn_backlog"
+			return false, "Cannot read net.ipv4.tcp_max_syn_backlog", ""
 		}
 		if v >= 4096 {
-			return true, fmt.Sprintf("net.ipv4.tcp_max_syn_backlog = %d (≥ 4096 — large SYN queue)", v)
+			return true, fmt.Sprintf("net.ipv4.tcp_max_syn_backlog = %d (≥ 4096 — large SYN queue)", v), ""
 		}
-		return false, fmt.Sprintf("net.ipv4.tcp_max_syn_backlog = %d — set to ≥ 4096: sysctl -w net.ipv4.tcp_max_syn_backlog=4096", v)
+		return false, fmt.Sprintf("net.ipv4.tcp_max_syn_backlog = %d — increase SYN queue to handle connection bursts", v), "sysctl -w net.ipv4.tcp_max_syn_backlog=4096"
 
 	case "net_rmem_max":
 		v, err := sysctlInt("net.core.rmem_max")
 		if err != nil {
-			return false, "Cannot read net.core.rmem_max"
+			return false, "Cannot read net.core.rmem_max", ""
 		}
 		if v >= 4194304 {
-			return true, fmt.Sprintf("net.core.rmem_max = %d bytes (≥ 4 MiB recv buffer)", v)
+			return true, fmt.Sprintf("net.core.rmem_max = %d bytes (≥ 4 MiB recv buffer)", v), ""
 		}
-		return false, fmt.Sprintf("net.core.rmem_max = %d bytes — set to ≥ 4194304: sysctl -w net.core.rmem_max=4194304", v)
+		return false, fmt.Sprintf("net.core.rmem_max = %d bytes — increase max receive socket buffer to 4 MiB", v), "sysctl -w net.core.rmem_max=4194304"
 
 	case "net_wmem_max":
 		v, err := sysctlInt("net.core.wmem_max")
 		if err != nil {
-			return false, "Cannot read net.core.wmem_max"
+			return false, "Cannot read net.core.wmem_max", ""
 		}
 		if v >= 4194304 {
-			return true, fmt.Sprintf("net.core.wmem_max = %d bytes (≥ 4 MiB send buffer)", v)
+			return true, fmt.Sprintf("net.core.wmem_max = %d bytes (≥ 4 MiB send buffer)", v), ""
 		}
-		return false, fmt.Sprintf("net.core.wmem_max = %d bytes — set to ≥ 4194304: sysctl -w net.core.wmem_max=4194304", v)
+		return false, fmt.Sprintf("net.core.wmem_max = %d bytes — increase max send socket buffer to 4 MiB", v), "sysctl -w net.core.wmem_max=4194304"
 
 	case "net_tcp_fin_timeout":
 		v, err := sysctlInt("net.ipv4.tcp_fin_timeout")
 		if err != nil {
-			return false, "Cannot read net.ipv4.tcp_fin_timeout"
+			return false, "Cannot read net.ipv4.tcp_fin_timeout", ""
 		}
 		if v <= 30 {
-			return true, fmt.Sprintf("net.ipv4.tcp_fin_timeout = %ds (≤ 30s — faster TIME_WAIT reclaim)", v)
+			return true, fmt.Sprintf("net.ipv4.tcp_fin_timeout = %ds (≤ 30s — faster TIME_WAIT reclaim)", v), ""
 		}
-		return false, fmt.Sprintf("net.ipv4.tcp_fin_timeout = %ds — set to ≤ 30: sysctl -w net.ipv4.tcp_fin_timeout=15", v)
+		return false, fmt.Sprintf("net.ipv4.tcp_fin_timeout = %ds — reduce TIME_WAIT hold time to free ports faster", v), "sysctl -w net.ipv4.tcp_fin_timeout=15"
 
 	case "net_ip_local_port_range":
 		v, err := sysctl("net.ipv4.ip_local_port_range")
 		if err != nil {
-			return false, "Cannot read net.ipv4.ip_local_port_range"
+			return false, "Cannot read net.ipv4.ip_local_port_range", ""
 		}
 		parts := strings.Fields(v)
 		if len(parts) == 2 {
 			upper, err := strconv.ParseInt(parts[1], 10, 64)
 			if err == nil && upper >= 65000 {
-				return true, fmt.Sprintf("ip_local_port_range = %s (upper ≥ 65000 — large ephemeral port range)", v)
+				return true, fmt.Sprintf("ip_local_port_range = %s (upper ≥ 65000 — large ephemeral port range)", v), ""
 			}
 		}
-		return false, fmt.Sprintf("ip_local_port_range = %s — set upper to ≥ 65000: sysctl -w net.ipv4.ip_local_port_range=\"1024 65535\"", v)
+		return false, fmt.Sprintf("ip_local_port_range = %s — expand ephemeral port range to reduce exhaustion risk", v), `sysctl -w net.ipv4.ip_local_port_range="1024 65535"`
 
 	case "kernel_pid_max":
 		v, err := sysctlInt("kernel.pid_max")
 		if err != nil {
-			return false, "Cannot read kernel.pid_max"
+			return false, "Cannot read kernel.pid_max", ""
 		}
 		if v >= 131072 {
-			return true, fmt.Sprintf("kernel.pid_max = %d (≥ 131072 — supports large workloads)", v)
+			return true, fmt.Sprintf("kernel.pid_max = %d (≥ 131072 — supports large workloads)", v), ""
 		}
-		return false, fmt.Sprintf("kernel.pid_max = %d — set to ≥ 131072: sysctl -w kernel.pid_max=131072", v)
+		return false, fmt.Sprintf("kernel.pid_max = %d — raise PID limit to support containerized and large workloads", v), "sysctl -w kernel.pid_max=131072"
 
 	case "net_tcp_bbr":
 		v, err := sysctl("net.ipv4.tcp_congestion_control")
 		if err != nil {
-			return false, "Cannot read tcp_congestion_control"
+			return false, "Cannot read tcp_congestion_control", ""
 		}
 		if strings.TrimSpace(v) == "bbr" {
-			return true, "TCP congestion control is BBR (better throughput on modern kernels)"
+			return true, "TCP congestion control is BBR (better throughput on modern kernels)", ""
 		}
-		return false, fmt.Sprintf("tcp_congestion_control = %s — enable BBR: modprobe tcp_bbr && sysctl -w net.ipv4.tcp_congestion_control=bbr", v)
+		return false, fmt.Sprintf("tcp_congestion_control = %s — BBR provides better throughput; requires kernel ≥ 4.9 with BBR module", v),
+			"modprobe tcp_bbr && sysctl -w net.ipv4.tcp_congestion_control=bbr"
 
 	case "systemd_nofile_hard":
 		for _, p := range []string{"/etc/systemd/system.conf", "/etc/systemd/system.conf.d/limits.conf"} {
@@ -313,7 +315,6 @@ func runCheck(id string) (bool, string) {
 					continue
 				}
 				val := strings.TrimSpace(parts[1])
-				// format: soft:hard or just value
 				limits := strings.SplitN(val, ":", 2)
 				hardStr := limits[len(limits)-1]
 				hard, err := strconv.ParseInt(strings.TrimSpace(hardStr), 10, 64)
@@ -321,23 +322,26 @@ func runCheck(id string) (bool, string) {
 					continue
 				}
 				if hard >= 1048576 {
-					return true, fmt.Sprintf("DefaultLimitNOFILE hard = %d (≥ 1048576)", hard)
+					return true, fmt.Sprintf("DefaultLimitNOFILE hard = %d (≥ 1048576)", hard), ""
 				}
-				return false, fmt.Sprintf("DefaultLimitNOFILE hard = %d — set to ≥ 1048576 in /etc/systemd/system.conf", hard)
+				return false, fmt.Sprintf("DefaultLimitNOFILE hard = %d in %s — raise to ≥ 1048576 for services with many open files", hard, p),
+					`printf '\n[Manager]\nDefaultLimitNOFILE=1048576:1048576\n' >> /etc/systemd/system.conf && systemctl daemon-reexec`
 			}
 		}
-		return false, "DefaultLimitNOFILE not set in /etc/systemd/system.conf — add: DefaultLimitNOFILE=1048576:1048576"
+		return false, "DefaultLimitNOFILE not set in /etc/systemd/system.conf — add it to raise open-file limits for all services",
+			`printf '\n[Manager]\nDefaultLimitNOFILE=1048576:1048576\n' >> /etc/systemd/system.conf && systemctl daemon-reexec`
 
 	case "net_tcp_slow_start":
 		v, err := sysctlInt("net.ipv4.tcp_slow_start_after_idle")
 		if err != nil {
-			return false, "Cannot read tcp_slow_start_after_idle (kernel may not support it)"
+			return false, "Cannot read tcp_slow_start_after_idle (kernel may not support it)", ""
 		}
 		if v == 0 {
-			return true, "tcp_slow_start_after_idle = 0 (disabled — better for long-lived connections)"
+			return true, "tcp_slow_start_after_idle = 0 (disabled — better for long-lived connections)", ""
 		}
-		return false, fmt.Sprintf("tcp_slow_start_after_idle = %d — disable: sysctl -w net.ipv4.tcp_slow_start_after_idle=0", v)
+		return false, fmt.Sprintf("tcp_slow_start_after_idle = %d — disable to prevent throughput collapse on long-lived idle connections", v),
+			"sysctl -w net.ipv4.tcp_slow_start_after_idle=0"
 	}
 
-	return false, fmt.Sprintf("unknown check id: %s", id)
+	return false, fmt.Sprintf("unknown check id: %s", id), ""
 }

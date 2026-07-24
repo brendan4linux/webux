@@ -25,6 +25,7 @@ type Result struct {
 	Check
 	Pass   bool   `json:"pass"`
 	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"` // runnable command to remediate, empty if manual steps required
 }
 
 // Score is the aggregated result of all checks.
@@ -70,8 +71,8 @@ func RunAll() *Score {
 		wg.Add(1)
 		go func(idx int, c Check) {
 			defer wg.Done()
-			pass, detail := runCheck(c.ID)
-			results[idx] = Result{Check: c, Pass: pass, Detail: detail}
+			pass, detail, fix := runCheck(c.ID)
+			results[idx] = Result{Check: c, Pass: pass, Detail: detail, Fix: fix}
 		}(i, ch)
 	}
 	wg.Wait()
@@ -141,38 +142,75 @@ func levelColor(pct int) string {
 	}
 }
 
-func runCheck(id string) (bool, string) {
+func runCheck(id string) (bool, string, string) {
 	switch id {
 	case "ssh_no_password":
-		return checkSSHDirective("passwordauthentication", "no",
+		pass, detail := checkSSHDirective("passwordauthentication", "no",
 			"SSH password authentication is disabled",
-			"Set `PasswordAuthentication no` in /etc/ssh/sshd_config and restart sshd")
+			"SSH password authentication is enabled — disable it to require key-based login")
+		fix := ""
+		if !pass {
+			fix = "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl restart sshd"
+		}
+		return pass, detail, fix
 	case "ssh_no_root":
-		return checkSSHNoRoot()
+		pass, detail := checkSSHNoRoot()
+		fix := ""
+		if !pass {
+			fix = "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && systemctl restart sshd"
+		}
+		return pass, detail, fix
 	case "ssh_protocol2":
 		cfg := readSSHDConfig()
 		if strings.Contains(strings.ToLower(cfg), "protocol 1") {
-			return false, "sshd_config explicitly enables Protocol 1 — critical vulnerability"
+			return false, "sshd_config explicitly enables Protocol 1 — critical vulnerability",
+				"sed -i '/^Protocol/d' /etc/ssh/sshd_config && systemctl restart sshd"
 		}
-		return true, "SSH Protocol 2 is in use (Protocol 1 not enabled)"
+		return true, "SSH Protocol 2 is in use (Protocol 1 not enabled)", ""
 	case "firewall_active":
-		return checkFirewall()
+		pass, detail := checkFirewall()
+		fix := ""
+		if !pass {
+			fix = "ufw enable"
+		}
+		return pass, detail, fix
 	case "tmp_noexec":
-		return checkMountOption("/tmp", "noexec",
+		pass, detail := checkMountOption("/tmp", "noexec",
 			"/tmp is mounted with noexec",
-			"Add `noexec` to /tmp's fstab mount options and remount")
+			"/tmp is not mounted with noexec — executables can run from /tmp")
+		fix := ""
+		if !pass {
+			fix = "mount -o remount,noexec /tmp"
+		}
+		return pass, detail, fix
 	case "vartmp_noexec":
-		return checkMountOption("/var/tmp", "noexec",
+		pass, detail := checkMountOption("/var/tmp", "noexec",
 			"/var/tmp is mounted with noexec",
-			"Add `noexec` to /var/tmp's fstab mount options and remount")
+			"/var/tmp is not mounted with noexec — executables can run from /var/tmp")
+		fix := ""
+		if !pass {
+			fix = "mount -o remount,noexec /var/tmp"
+		}
+		return pass, detail, fix
 	case "auto_updates":
-		return checkAutoUpdates()
+		pass, detail := checkAutoUpdates()
+		fix := ""
+		if !pass {
+			fix = "apt-get install -y unattended-upgrades && systemctl enable --now unattended-upgrades"
+		}
+		return pass, detail, fix
 	case "intrusion_prevention":
-		return checkIntrusionPrevention()
+		pass, detail := checkIntrusionPrevention()
+		fix := ""
+		if !pass {
+			fix = "apt-get install -y fail2ban && systemctl enable --now fail2ban"
+		}
+		return pass, detail, fix
 	case "no_empty_passwords":
-		return checkNoEmptyPasswords()
+		pass, detail := checkNoEmptyPasswords()
+		return pass, detail, ""
 	}
-	return false, fmt.Sprintf("unknown check id: %s", id)
+	return false, fmt.Sprintf("unknown check id: %s", id), ""
 }
 
 func readSSHDConfig() string {

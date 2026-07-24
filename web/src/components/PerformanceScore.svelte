@@ -8,6 +8,7 @@
     points: number;
     pass: boolean;
     detail: string;
+    fix?: string;
   }
   interface Score {
     results: Result[];
@@ -55,6 +56,25 @@
 
   function toggle(id: string) {
     expanded = expanded === id ? null : id;
+  }
+
+  function runInTerminal(cmd: string) {
+    const term = (window as any).__webuxTerminal;
+    if (term?.runCommand) {
+      term.runCommand(cmd);
+      return;
+    }
+    window.location.hash = '#/terminal';
+    let attempts = 0;
+    const poll = setInterval(() => {
+      const t = (window as any).__webuxTerminal;
+      if (t?.runCommand) {
+        clearInterval(poll);
+        setTimeout(() => t.runCommand(cmd), 400);
+        return;
+      }
+      if (++attempts > 40) clearInterval(poll);
+    }, 50);
   }
 
   onMount(load);
@@ -114,6 +134,14 @@
             {#if expanded === r.id}
               <div class="ps-detail">
                 <p class="ps-detail-text">{r.detail}</p>
+                {#if !r.pass && r.fix}
+                  <div class="ps-fix-row">
+                    <code class="ps-fix-cmd">{r.fix}</code>
+                    <button class="ps-run-btn" onclick={() => runInTerminal(r.fix!)}>
+                      ▶ Run in Terminal
+                    </button>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -260,8 +288,46 @@
 .ps-detail-text {
   font-size: 0.76rem;
   color: var(--text-secondary);
-  margin: 0;
+  margin: 0 0 0.5rem;
   line-height: 1.5;
+}
+.ps-fix-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+.ps-fix-cmd {
+  font-family: monospace;
+  font-size: 0.72rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  padding: 0.2rem 0.45rem;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  display: block;
+}
+.ps-run-btn {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.ps-run-btn:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 .ps-footer {
