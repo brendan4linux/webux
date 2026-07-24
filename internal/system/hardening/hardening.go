@@ -196,14 +196,14 @@ func runCheck(id string) (bool, string, string) {
 		pass, detail := checkAutoUpdates()
 		fix := ""
 		if !pass {
-			fix = "apt-get install -y unattended-upgrades && systemctl enable --now unattended-upgrades"
+			fix = autoUpdatesFix()
 		}
 		return pass, detail, fix
 	case "intrusion_prevention":
 		pass, detail := checkIntrusionPrevention()
 		fix := ""
 		if !pass {
-			fix = "apt-get install -y fail2ban && systemctl enable --now fail2ban"
+			fix = intrusionPreventionFix()
 		}
 		return pass, detail, fix
 	case "no_empty_passwords":
@@ -211,6 +211,46 @@ func runCheck(id string) (bool, string, string) {
 		return pass, detail, ""
 	}
 	return false, fmt.Sprintf("unknown check id: %s", id), ""
+}
+
+// detectPkgMgr returns the package manager available on this system.
+func detectPkgMgr() string {
+	for _, pm := range []string{"pacman", "dnf", "yum", "zypper", "apt-get"} {
+		if _, err := exec.LookPath(pm); err == nil {
+			return pm
+		}
+	}
+	return "apt-get"
+}
+
+func autoUpdatesFix() string {
+	switch detectPkgMgr() {
+	case "pacman":
+		return "pacman -S --noconfirm pacman-contrib && systemctl enable --now paccache.timer"
+	case "dnf":
+		return "dnf install -y dnf-automatic && systemctl enable --now dnf-automatic.timer"
+	case "yum":
+		return "yum install -y yum-cron && systemctl enable --now yum-cron"
+	case "zypper":
+		return "zypper install -y yast2-online-update-configuration && systemctl enable --now yast2-online-update-configuration.service"
+	default:
+		return "apt-get install -y unattended-upgrades && systemctl enable --now unattended-upgrades"
+	}
+}
+
+func intrusionPreventionFix() string {
+	switch detectPkgMgr() {
+	case "pacman":
+		return "pacman -S --noconfirm fail2ban && systemctl enable --now fail2ban"
+	case "dnf":
+		return "dnf install -y fail2ban && systemctl enable --now fail2ban"
+	case "yum":
+		return "yum install -y fail2ban && systemctl enable --now fail2ban"
+	case "zypper":
+		return "zypper install -y fail2ban && systemctl enable --now fail2ban"
+	default:
+		return "apt-get install -y fail2ban && systemctl enable --now fail2ban"
+	}
 }
 
 func readSSHDConfig() string {
