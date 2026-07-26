@@ -9,7 +9,7 @@ import (
 	"github.com/brendan4linux/webux/internal/system/hardening"
 )
 
-const hardeningCacheKey = "hardening.results.v2"
+const hardeningCacheKey = "hardening.results.v3"
 const hardeningCacheTTL = 24 * time.Hour
 
 // HardeningHandler manages security hardening score checks.

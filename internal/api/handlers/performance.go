@@ -9,7 +9,7 @@ import (
 	"github.com/brendan4linux/webux/internal/system/performance"
 )
 
-const perfCacheKey = "performance.results.v2"
+const perfCacheKey = "performance.results.v3"
 const perfCacheTTL = 24 * time.Hour
 
 type PerformanceHandler struct {
