@@ -150,28 +150,28 @@ func runCheck(id string) (bool, string, string) {
 			"SSH password authentication is enabled — disable it to require key-based login")
 		fix := ""
 		if !pass {
-			fix = "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl restart sshd"
+			fix = "sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && sudo systemctl restart sshd"
 		}
 		return pass, detail, fix
 	case "ssh_no_root":
 		pass, detail := checkSSHNoRoot()
 		fix := ""
 		if !pass {
-			fix = "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && systemctl restart sshd"
+			fix = "sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && sudo systemctl restart sshd"
 		}
 		return pass, detail, fix
 	case "ssh_protocol2":
 		cfg := readSSHDConfig()
 		if strings.Contains(strings.ToLower(cfg), "protocol 1") {
 			return false, "sshd_config explicitly enables Protocol 1 — critical vulnerability",
-				"sed -i '/^Protocol/d' /etc/ssh/sshd_config && systemctl restart sshd"
+				"sudo sed -i '/^Protocol/d' /etc/ssh/sshd_config && sudo systemctl restart sshd"
 		}
 		return true, "SSH Protocol 2 is in use (Protocol 1 not enabled)", ""
 	case "firewall_active":
 		pass, detail := checkFirewall()
 		fix := ""
 		if !pass {
-			fix = "ufw enable"
+			fix = "sudo ufw enable"
 		}
 		return pass, detail, fix
 	case "tmp_noexec":
@@ -180,7 +180,7 @@ func runCheck(id string) (bool, string, string) {
 			"/tmp is not mounted with noexec — executables can run from /tmp")
 		fix := ""
 		if !pass {
-			fix = "mount -o remount,noexec /tmp"
+			fix = "sudo mount -o remount,noexec /tmp"
 		}
 		return pass, detail, fix
 	case "vartmp_noexec":
@@ -189,7 +189,7 @@ func runCheck(id string) (bool, string, string) {
 			"/var/tmp is not mounted with noexec — executables can run from /var/tmp")
 		fix := ""
 		if !pass {
-			fix = "mount -o remount,noexec /var/tmp"
+			fix = "sudo mount -o remount,noexec /var/tmp"
 		}
 		return pass, detail, fix
 	case "auto_updates":
@@ -226,30 +226,30 @@ func detectPkgMgr() string {
 func autoUpdatesFix() string {
 	switch detectPkgMgr() {
 	case "pacman":
-		return "pacman -S --noconfirm pacman-contrib && systemctl enable --now paccache.timer"
+		return "sudo pacman -S --noconfirm pacman-contrib && sudo systemctl enable --now paccache.timer"
 	case "dnf":
-		return "dnf install -y dnf-automatic && systemctl enable --now dnf-automatic.timer"
+		return "sudo dnf install -y dnf-automatic && sudo systemctl enable --now dnf-automatic.timer"
 	case "yum":
-		return "yum install -y yum-cron && systemctl enable --now yum-cron"
+		return "sudo yum install -y yum-cron && sudo systemctl enable --now yum-cron"
 	case "zypper":
-		return "zypper install -y yast2-online-update-configuration && systemctl enable --now yast2-online-update-configuration.service"
+		return "sudo zypper install -y yast2-online-update-configuration && sudo systemctl enable --now yast2-online-update-configuration.service"
 	default:
-		return "apt-get install -y unattended-upgrades && systemctl enable --now unattended-upgrades"
+		return "sudo apt-get install -y unattended-upgrades && sudo systemctl enable --now unattended-upgrades"
 	}
 }
 
 func intrusionPreventionFix() string {
 	switch detectPkgMgr() {
 	case "pacman":
-		return "pacman -S --noconfirm fail2ban && systemctl enable --now fail2ban"
+		return "sudo pacman -S --noconfirm fail2ban && sudo systemctl enable --now fail2ban"
 	case "dnf":
-		return "dnf install -y fail2ban && systemctl enable --now fail2ban"
+		return "sudo dnf install -y fail2ban && sudo systemctl enable --now fail2ban"
 	case "yum":
-		return "yum install -y fail2ban && systemctl enable --now fail2ban"
+		return "sudo yum install -y fail2ban && sudo systemctl enable --now fail2ban"
 	case "zypper":
-		return "zypper install -y fail2ban && systemctl enable --now fail2ban"
+		return "sudo zypper install -y fail2ban && sudo systemctl enable --now fail2ban"
 	default:
-		return "apt-get install -y fail2ban && systemctl enable --now fail2ban"
+		return "sudo apt-get install -y fail2ban && sudo systemctl enable --now fail2ban"
 	}
 }
 
