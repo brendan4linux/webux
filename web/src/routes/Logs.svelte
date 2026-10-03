@@ -15,6 +15,7 @@
   let loadingDirs:    Set<string> = $state(new Set());
   let units:          Unit[]      = $state([]);
   let unitFilter:     string      = $state('');
+  let fileFilter:     string      = $state('');
   let activeSource:   Source      = $state(null);
 
   let lines:          string[]    = $state([]);
@@ -42,6 +43,12 @@
           u.name.toLowerCase().includes(unitFilter.toLowerCase()) ||
           u.description.toLowerCase().includes(unitFilter.toLowerCase()))
       : units
+  );
+
+  let filteredRootEntries = $derived(
+    fileFilter.trim()
+      ? rootEntries.filter(e => e.name.toLowerCase().includes(fileFilter.toLowerCase()))
+      : rootEntries
   );
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -190,8 +197,11 @@
     <!-- /var/log tree -->
     <div class="sidebar-section">
       <div class="sidebar-section-header">/var/log</div>
+      <div class="file-filter-wrap">
+        <input class="unit-filter" placeholder="search files…" bind:value={fileFilter} />
+      </div>
       <div class="tree">
-        {#each rootEntries as entry (entry.path)}
+        {#each filteredRootEntries as entry (entry.path)}
           <div class="tree-item" class:active={activeSource?.kind === 'file' && activeSource.path === entry.path}>
             {#if entry.is_dir}
               <button class="tree-btn dir-btn" onclick={() => toggleDir(entry.path)}>
@@ -409,6 +419,7 @@
 
 /* ── Unit list ── */
 .unit-filter-wrap { padding: 0.3rem 0.625rem; }
+.file-filter-wrap { padding: 0.3rem 0.625rem 0.1rem; }
 .unit-filter {
   width: 100%;
   background: var(--bg-raised);

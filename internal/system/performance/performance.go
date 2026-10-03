@@ -4,6 +4,7 @@ package performance
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -86,7 +87,7 @@ func RunAll() *Score {
 	}
 	pct := 0
 	if max > 0 {
-		pct = raw * 100 / max
+		pct = int(math.Round(float64(raw) * 100 / float64(max)))
 	}
 
 	rank, rankIcon := scoreRank(pct)

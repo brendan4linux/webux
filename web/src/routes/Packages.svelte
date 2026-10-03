@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { api } from '$lib/api';
   import CLIEchoPane from '$components/CLIEchoPane.svelte';
+  import { pkgOp } from '$lib/pkg-store.svelte';
 
   interface Package { name:string; version:string; new_version:string; description:string; size:string; repo:string; installed:boolean; upgradable:boolean; }
   interface FlatpakApp { name:string; app_id:string; version:string; branch:string; origin:string; install_type:string; }
@@ -26,9 +27,16 @@
   let filterText        = $state('');
   let searchQuery       = $state('');
 
-  let opOutput:string[] = $state([]);
-  let opRunning = $state(false);
-  let opTitle   = $state('');
+  let opBodyEl: HTMLElement | null = $state(null);
+
+  // Auto-scroll the output panel whenever new lines arrive
+  $effect(() => {
+    if (pkgOp.output.length > 0) {
+      tick().then(() => {
+        if (opBodyEl) opBodyEl.scrollTop = opBodyEl.scrollHeight;
+      });
+    }
+  });
 
   // Repo modals
   let showAddRepo  = $state(false);
@@ -110,25 +118,9 @@
     finally { searching = false; }
   }
 
-  async function streamOp(url:string, body:any, title:string) {
-    opRunning = true; opOutput = []; opTitle = title;
-    try {
-      const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-      const reader = resp.body!.getReader(); const dec = new TextDecoder(); let buf = '';
-      while(true) {
-        const {done,value} = await reader.read(); if(done) break;
-        buf += dec.decode(value,{stream:true});
-        const lines = buf.split('\n');
-        for(const line of lines.slice(0,-1)) { if(line.startsWith('data: ')) opOutput = [...opOutput, line.slice(6)]; }
-        buf = lines[lines.length-1];
-      }
-    } catch(e:any) { opOutput = [...opOutput, '[error] '+String(e)]; }
-    finally {
-      opRunning = false;
-      _loadedInstalled = false; loadInstalled();
-      if(tab==='upgradable') { _loadedUpgradable=false; loadUpgradable(); }
-      if(tab==='flatpak')    { _loadedFlatpak=false;    loadFlatpaks(); }
-    }
+  function streamOp(url:string, body:any, title:string) {
+    // Fire-and-forget into the global store so it survives navigation
+    pkgOp.start(url, body, title);
   }
 
   const install        = (name:string) => streamOp('/api/packages/install',       {name},  'Installing '+name+'…');
@@ -174,6 +166,13 @@
     await loadInfo();
     _loadedInstalled = true;
     await loadInstalled();
+    // If an op completed while we were away, refresh the current tab
+    if (pkgOp.needsRefresh) {
+      pkgOp.needsRefresh = false;
+      _loadedUpgradable = false;
+      if (tab === 'upgradable') loadUpgradable();
+      if (tab === 'flatpak')   { _loadedFlatpak = false; loadFlatpaks(); }
+    }
   });
 </script>
 
@@ -190,8 +189,8 @@
       </p>
     </div>
     <div class="actions">
-      <button class="btn" onclick={updateCache} disabled={opRunning}>⟳ Update cache</button>
-      <button class="btn btn-primary" onclick={() => upgrade()} disabled={opRunning}>↑ Upgrade all</button>
+      <button class="btn" onclick={updateCache} disabled={pkgOp.running}>⟳ Update cache</button>
+      <button class="btn btn-primary" onclick={() => upgrade()} disabled={pkgOp.running}>↑ Upgrade all</button>
     </div>
   </div>
 
@@ -204,15 +203,15 @@
       No supported package manager detected (pacman, apt, dnf, yum)
     </div>
   {:else}
-    {#if opOutput.length > 0}
+    {#if pkgOp.output.length > 0}
       <div class="card op-panel">
         <div class="op-header">
-          <span class="mono" style="font-size:0.78rem">{opTitle}</span>
-          {#if opRunning}<span class="dot dot-green" style="margin-left:0.5rem"></span>{/if}
-          {#if !opRunning}<button class="btn btn-ghost" style="margin-left:auto;font-size:0.72rem" onclick={() => opOutput=[]}>✕ Clear</button>{/if}
+          <span class="mono" style="font-size:0.78rem">{pkgOp.title}</span>
+          {#if pkgOp.running}<span class="dot dot-green" style="margin-left:0.5rem"></span>{/if}
+          {#if !pkgOp.running}<button class="btn btn-ghost" style="margin-left:auto;font-size:0.72rem" onclick={() => pkgOp.clear()}>✕ Clear</button>{/if}
         </div>
-        <div class="op-body">
-          {#each opOutput as line}
+        <div class="op-body" bind:this={opBodyEl}>
+          {#each pkgOp.output as line}
             <div class="op-line mono" class:line-ok={line.includes('install')||line.includes('complet')||line.includes('done')} class:line-err={line.includes('error')||line.includes('Error')||line.includes('failed')}>{line}</div>
           {/each}
         </div>
@@ -258,7 +257,7 @@
                   <td style="color:var(--text-tertiary);font-size:0.78rem">{pkg.size||'—'}</td>
                   <td style="font-size:0.78rem;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={pkg.description}>{pkg.description||'—'}</td>
                   <td style="text-align:right">
-                    <button class="btn btn-ghost" style="font-size:0.72rem;color:var(--red)" disabled={opRunning} onclick={() => remove(pkg.name)}>✕</button>
+                    <button class="btn btn-ghost" style="font-size:0.72rem;color:var(--red)" disabled={pkgOp.running} onclick={() => remove(pkg.name)}>✕</button>
                   </td>
                 </tr>
               {/each}
@@ -271,7 +270,7 @@
     {:else if tab === 'upgradable'}
       <div style="margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem">
         <span style="font-size:0.85rem;color:var(--text-secondary)">{upgradable.length} packages can be upgraded</span>
-        <button class="btn btn-primary" disabled={opRunning||upgradable.length===0} onclick={() => upgrade()}>↑ Upgrade all</button>
+        <button class="btn btn-primary" disabled={pkgOp.running||upgradable.length===0} onclick={() => upgrade()}>↑ Upgrade all</button>
       </div>
       <div class="card" style="padding:0">
         <table class="data-table">
@@ -289,7 +288,7 @@
                   <td class="mono" style="font-size:0.8rem;color:var(--accent)">{pkg.new_version}</td>
                   <td style="font-size:0.78rem;color:var(--text-tertiary)">{pkg.repo||'—'}</td>
                   <td style="text-align:right">
-                    <button class="btn btn-primary" style="font-size:0.72rem" disabled={opRunning} onclick={() => upgrade(pkg.name)}>↑</button>
+                    <button class="btn btn-primary" style="font-size:0.72rem" disabled={pkgOp.running} onclick={() => upgrade(pkg.name)}>↑</button>
                   </td>
                 </tr>
               {/each}
@@ -314,7 +313,7 @@
                   <td class="mono" style="font-weight:600">{pkg.name}</td>
                   <td style="font-size:0.82rem;color:var(--text-secondary)">{pkg.description||'—'}</td>
                   <td style="text-align:right">
-                    <button class="btn btn-primary" style="font-size:0.72rem" disabled={opRunning} onclick={() => install(pkg.name)}>+ Install</button>
+                    <button class="btn btn-primary" style="font-size:0.72rem" disabled={pkgOp.running} onclick={() => install(pkg.name)}>+ Install</button>
                   </td>
                 </tr>
               {/each}
@@ -329,7 +328,7 @@
     {:else if tab === 'flatpak'}
       <div style="margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem">
         <span style="font-size:0.85rem;color:var(--text-secondary)">{flatpaks.length} Flatpaks installed</span>
-        <button class="btn btn-primary" disabled={opRunning} onclick={updateFlatpaks}>↑ Update all Flatpaks</button>
+        <button class="btn btn-primary" disabled={pkgOp.running} onclick={updateFlatpaks}>↑ Update all Flatpaks</button>
       </div>
       <div class="card" style="padding:0">
         <table class="data-table">
@@ -348,7 +347,7 @@
                   <td style="font-size:0.78rem;color:var(--text-tertiary)">{app.origin}</td>
                   <td><span class="badge {app.install_type==='system'?'badge-blue':'badge-gray'}">{app.install_type}</span></td>
                   <td style="text-align:right">
-                    <button class="btn btn-ghost" style="font-size:0.72rem;color:var(--red)" disabled={opRunning} onclick={() => removeFlatpak(app.app_id)}>✕</button>
+                    <button class="btn btn-ghost" style="font-size:0.72rem;color:var(--red)" disabled={pkgOp.running} onclick={() => removeFlatpak(app.app_id)}>✕</button>
                   </td>
                 </tr>
               {/each}
