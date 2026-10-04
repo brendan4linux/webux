@@ -70,10 +70,46 @@ func Action(id, action string) error {
 
 // ── Proxmox ───────────────────────────────────────────────────────────────────
 
+func listProxmox() ([]VM, error) {
+	node, _ := os.Hostname()
+
+	// Single pvesh call returns vmid, name, status, maxmem (bytes), cpus — no per-VM follow-up needed.
+	out, err := exec.Command("pvesh", "get", "/nodes/"+node+"/qemu",
+		"--output-format", "json").Output()
+	if err != nil {
+		// pvesh unavailable or failed — fall back to qm list (no vCPU info)
+		return listProxmoxFallback()
+	}
+
+	var raw []struct {
+		VMID   int    `json:"vmid"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		MaxMem int64  `json:"maxmem"` // bytes
+		CPUs   int    `json:"cpus"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return listProxmoxFallback()
+	}
+
+	vms := make([]VM, 0, len(raw))
+	for _, r := range raw {
+		vms = append(vms, VM{
+			ID:       strconv.Itoa(r.VMID),
+			Name:     r.Name,
+			State:    normalizeState(r.Status),
+			MemoryMB: r.MaxMem / 1024 / 1024,
+			VCPUs:    r.CPUs,
+			Backend:  BackendProxmox,
+		})
+	}
+	return vms, nil
+}
+
 // qm list columns: VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID
 var qmListRe = regexp.MustCompile(`^\s*(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)`)
 
-func listProxmox() ([]VM, error) {
+func listProxmoxFallback() ([]VM, error) {
 	out, err := exec.Command("qm", "list").Output()
 	if err != nil {
 		return nil, fmt.Errorf("qm list: %w", err)
@@ -86,26 +122,13 @@ func listProxmox() ([]VM, error) {
 			continue
 		}
 		mem, _ := strconv.ParseInt(m[4], 10, 64)
-		disk := m[5] + " GB"
 		vms = append(vms, VM{
 			ID:       m[1],
 			Name:     m[2],
 			State:    normalizeState(m[3]),
 			MemoryMB: mem,
-			Disk:     disk,
 			Backend:  BackendProxmox,
 		})
-	}
-	// enrich vCPU count from qm config (best-effort; skip on error)
-	for i := range vms {
-		if cfg, err := exec.Command("qm", "config", vms[i].ID).Output(); err == nil {
-			for _, line := range strings.Split(string(cfg), "\n") {
-				if strings.HasPrefix(line, "cores:") {
-					v, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "cores:")))
-					vms[i].VCPUs = v
-				}
-			}
-		}
 	}
 	return vms, nil
 }
