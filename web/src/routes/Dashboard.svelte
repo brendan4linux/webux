@@ -24,7 +24,8 @@
   interface ClusterVM { vmid: number; name: string; node: string; state: string; local: boolean; }
   let vms          = $state<VM[]>([]);
   let clusterVMs   = $state<ClusterVM[]>([]);
-  let vmsLoaded    = $state(false);
+  let vmsLoaded    = $state(false);  // prevents duplicate fetches
+  let vmsLoading   = $state(false);  // controls the loading spinner
 
   const quickLinks = [
     { label: 'Open Ports',  href: '#/ports',      desc: 'TCP/UDP listeners' },
@@ -130,8 +131,8 @@
 
   async function loadVMs(hasHypervisor: boolean) {
     if (!hasHypervisor || vmsLoaded) return;
-    vmsLoaded = true;
-    // local VMs and cluster VMs fetched in parallel; cluster silently empty if not Proxmox
+    vmsLoaded  = true;
+    vmsLoading = true;
     const [localRes, clusterRes] = await Promise.allSettled([
       fetch('/api/vms'),
       fetch('/api/vms/cluster'),
@@ -140,6 +141,7 @@
       vms = await localRes.value.json();
     if (clusterRes.status === 'fulfilled' && clusterRes.value.ok)
       clusterVMs = await clusterRes.value.json();
+    vmsLoading = false;
   }
 
   let hasHypervisor = $derived(info?.has_proxmox || info?.has_kvm);
@@ -269,8 +271,8 @@
           <span class="vm-panel-title">{isProxmox ? 'Proxmox VMs (this node)' : 'Virtual Machines'}</span>
           <span class="vm-panel-link">View all →</span>
         </div>
-        {#if !vmsLoaded}
-          <div class="vm-loading">Loading…</div>
+        {#if vmsLoading}
+          <div class="vm-loading"><span class="vm-spinner"></span>Scanning VMs…</div>
         {:else if !vms.length}
           <div class="vm-empty">No VMs found</div>
         {:else}
@@ -417,6 +419,21 @@ a.vm-panel:hover { border-color: var(--accent); }
 .vm-loading, .vm-empty {
   font-size: 0.78rem;
   color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.vm-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: vm-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes vm-spin {
+  to { transform: rotate(360deg); }
 }
 .vm-counts {
   display: flex;

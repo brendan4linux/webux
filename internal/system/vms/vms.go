@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -70,28 +71,100 @@ func Action(id, action string) error {
 
 // ── Proxmox ───────────────────────────────────────────────────────────────────
 
+// listProxmox reads VM config files directly — no external process, ~0ms.
+// Proxmox stores each VM's config at /etc/pve/qemu-server/<VMID>.conf and
+// writes a PID file at /var/run/qemu-server/<VMID>.pid while the VM is running.
 func listProxmox() ([]VM, error) {
-	node, _ := os.Hostname()
+	const confDir = "/etc/pve/qemu-server"
+	const pidDir  = "/var/run/qemu-server"
 
-	// Single pvesh call returns vmid, name, status, maxmem (bytes), cpus — no per-VM follow-up needed.
+	entries, err := os.ReadDir(confDir)
+	if err != nil {
+		// Conf dir unreadable — fall back to pvesh then qm list
+		return listProxmoxPvesh()
+	}
+
+	var vms []VM
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".conf") {
+			continue
+		}
+		vmid := strings.TrimSuffix(name, ".conf")
+
+		data, err := os.ReadFile(filepath.Join(confDir, name))
+		if err != nil {
+			continue
+		}
+
+		vm := VM{ID: vmid, Backend: BackendProxmox}
+
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			key, val, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			val = strings.TrimSpace(val)
+			switch strings.TrimSpace(key) {
+			case "name":
+				vm.Name = val
+			case "cores":
+				vm.VCPUs, _ = strconv.Atoi(val)
+			case "memory":
+				mb, _ := strconv.ParseInt(val, 10, 64)
+				vm.MemoryMB = mb
+			case "virtio0", "scsi0", "ide0", "sata0":
+				// first disk line — extract size hint if present
+				if i := strings.Index(val, "size="); i >= 0 {
+					vm.Disk = val[i+5:]
+					if j := strings.IndexAny(vm.Disk, ",\n"); j >= 0 {
+						vm.Disk = vm.Disk[:j]
+					}
+				}
+			}
+		}
+
+		if vm.Name == "" {
+			vm.Name = "VM " + vmid
+		}
+
+		// Running if a PID file exists for this VMID
+		if _, err := os.Stat(filepath.Join(pidDir, vmid+".pid")); err == nil {
+			vm.State = "running"
+		} else {
+			vm.State = "stopped"
+		}
+
+		vms = append(vms, vm)
+	}
+	return vms, nil
+}
+
+// listProxmoxPvesh is the first fallback: one pvesh JSON call (~1s).
+func listProxmoxPvesh() ([]VM, error) {
+	node, _ := os.Hostname()
 	out, err := exec.Command("pvesh", "get", "/nodes/"+node+"/qemu",
 		"--output-format", "json").Output()
 	if err != nil {
-		// pvesh unavailable or failed — fall back to qm list (no vCPU info)
-		return listProxmoxFallback()
+		return listProxmoxQM()
 	}
-
 	var raw []struct {
 		VMID   int    `json:"vmid"`
 		Name   string `json:"name"`
 		Status string `json:"status"`
-		MaxMem int64  `json:"maxmem"` // bytes
+		MaxMem int64  `json:"maxmem"`
 		CPUs   int    `json:"cpus"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return listProxmoxFallback()
+		return listProxmoxQM()
 	}
-
 	vms := make([]VM, 0, len(raw))
 	for _, r := range raw {
 		vms = append(vms, VM{
@@ -109,7 +182,8 @@ func listProxmox() ([]VM, error) {
 // qm list columns: VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID
 var qmListRe = regexp.MustCompile(`^\s*(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)`)
 
-func listProxmoxFallback() ([]VM, error) {
+// listProxmoxQM is the last-resort fallback using qm list.
+func listProxmoxQM() ([]VM, error) {
 	out, err := exec.Command("qm", "list").Output()
 	if err != nil {
 		return nil, fmt.Errorf("qm list: %w", err)
