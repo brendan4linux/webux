@@ -23,6 +23,10 @@ type HostInfo struct {
 	HasUFW           bool
 	HasNFTables      bool
 	HasIPTables      bool
+
+	// Virtualisation
+	HasProxmox bool // qm on PATH
+	HasKVM     bool // virsh on PATH
 }
 
 // Detect probes the host and returns a HostInfo.
@@ -63,6 +67,8 @@ func Detect() (*HostInfo, error) {
 	h.HasUFW = commandExists("ufw")
 	h.HasNFTables = commandExists("nft")
 	h.HasIPTables = commandExists("iptables")
+	h.HasProxmox = commandExists("qm")
+	h.HasKVM = commandExists("virsh")
 
 	return h, nil
 }

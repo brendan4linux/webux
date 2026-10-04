@@ -24,6 +24,8 @@
   import AIAssistant from './routes/AIAssistant.svelte';
   import Disks from './routes/Disks.svelte';
   import Logs from './routes/Logs.svelte';
+  import VMs from './routes/VMs.svelte';
+  import SSL from './routes/SSL.svelte';
   import Settings from './routes/Settings.svelte';
   import Login from './routes/Login.svelte';
   import NotFound from './routes/NotFound.svelte';
@@ -72,6 +74,8 @@
     '#/ai':         AIAssistant,
     '#/disks':      Disks,
     '#/logs':       Logs,
+    '#/vms':        VMs,
+    '#/ssl':        SSL,
     '#/settings':   Settings,
   };
 

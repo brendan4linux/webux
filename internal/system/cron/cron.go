@@ -365,8 +365,14 @@ func validateSchedule(expr string) error {
 
 // ValidateSchedule checks a cron expression for basic correctness.
 func ValidateSchedule(expr string) error { return validateSchedule(expr) }
-func CommonSchedules() []struct{ Label, Value string } {
-	return []struct{ Label, Value string }{
+func CommonSchedules() []struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+} {
+	return []struct {
+		Label string `json:"label"`
+		Value string `json:"value"`
+	}{
 		{"Every minute", "* * * * *"},
 		{"Every 5 minutes", "*/5 * * * *"},
 		{"Every 15 minutes", "*/15 * * * *"},

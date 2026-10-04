@@ -228,6 +228,21 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Post("/packages/flatpak/remove", pkgH.RemoveFlatpak)
 		r.Post("/packages/flatpak/update", pkgH.UpdateFlatpaks)
 
+		// Virtual Machines (KVM/QEMU/Proxmox)
+		vmH := handlers.NewVMHandler()
+		r.Get("/vms/info", vmH.Info)
+		r.Get("/vms", vmH.List)
+		r.Get("/vms/cluster", vmH.Cluster)
+		r.Post("/vms/{id}/action", vmH.Action)
+
+		// SSL Certificates
+		sslH := handlers.NewSSLHandler()
+		r.Get("/ssl/certs", sslH.List)
+		r.Get("/ssl/cert", sslH.Get)
+		r.Get("/ssl/cert/pem", sslH.PEM)
+		r.Post("/ssl/csr", sslH.GenerateCSR)
+		r.Post("/ssl/self-signed", sslH.GenerateSelfSigned)
+
 		disksH := handlers.NewDisksHandler(learnStore)
 		r.Get("/disks", disksH.Summary)
 		r.Post("/disks/extend", disksH.Extend)

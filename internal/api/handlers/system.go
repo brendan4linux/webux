@@ -37,8 +37,10 @@ func (h *SystemHandler) Info(w http.ResponseWriter, r *http.Request) {
 		"has_ansible": h.hostInfo.HasAnsible,
 		"has_puppet":  h.hostInfo.HasPuppet,
 		"has_ufw":     h.hostInfo.HasUFW,
-		"has_nftables":h.hostInfo.HasNFTables,
-		"has_iptables":h.hostInfo.HasIPTables,
+		"has_nftables": h.hostInfo.HasNFTables,
+		"has_iptables": h.hostInfo.HasIPTables,
+		"has_proxmox":  h.hostInfo.HasProxmox,
+		"has_kvm":      h.hostInfo.HasKVM,
 	})
 }
 

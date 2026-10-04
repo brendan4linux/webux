@@ -11,6 +11,8 @@
         { href: '#/disks',     icon: '◫', label: 'Disks' },
         { href: '#/users',     icon: '◉', label: 'Users' },
         { href: '#/logs',      icon: '≡', label: 'Logs' },
+        { href: '#/cron',      icon: '◷', label: 'Cron' },
+        { href: '#/vms',       icon: '◧', label: 'Virtual Machines' },
       ]
     },
     {
@@ -29,7 +31,7 @@
         { href: '#/webservers', icon: '◫', label: 'Webservers' },
         { href: '#/packages', icon: '◫', label: 'Packages' },
         { href: '#/files', icon: '◱', label: 'Files' },
-        { href: '#/cron', icon: '◷', label: 'Cron' },
+        { href: '#/ssl',  icon: '◈', label: 'SSL Certificates' },
       ]
     },
     {

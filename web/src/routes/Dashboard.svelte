@@ -19,6 +19,13 @@
   let loading     = $state(true);
   let info: any   = $state(null);
 
+  // VM summary panel
+  interface VM { id: string; name: string; state: string; memory_mb: number; vcpus: number; }
+  interface ClusterVM { vmid: number; name: string; node: string; state: string; local: boolean; }
+  let vms          = $state<VM[]>([]);
+  let clusterVMs   = $state<ClusterVM[]>([]);
+  let vmsLoaded    = $state(false);
+
   const quickLinks = [
     { label: 'Open Ports',  href: '#/ports',      desc: 'TCP/UDP listeners' },
     { label: 'Processes',   href: '#/processes',   desc: 'Running processes' },
@@ -110,14 +117,44 @@
   function capabilities(): {label: string; active: boolean}[] {
     if (!info) return [];
     return [
-      { label: 'Docker',   active: info.has_docker   },
-      { label: 'Podman',   active: info.has_podman   },
-      { label: 'Ansible',  active: info.has_ansible  },
-      { label: 'Puppet',   active: info.has_puppet   },
-      { label: 'UFW',      active: info.has_ufw      },
-      { label: 'nftables', active: info.has_nftables },
-      { label: 'iptables', active: info.has_iptables },
+      { label: 'Docker',           active: info.has_docker   },
+      { label: 'Podman',           active: info.has_podman   },
+      { label: 'Ansible',          active: info.has_ansible  },
+      { label: 'Puppet',           active: info.has_puppet   },
+      { label: 'UFW',              active: info.has_ufw      },
+      { label: 'nftables',         active: info.has_nftables },
+      { label: 'iptables',         active: info.has_iptables },
+      { label: 'Virtual Machines', active: info.has_proxmox || info.has_kvm },
     ].filter(c => c.active !== undefined);
+  }
+
+  async function loadVMs(hasHypervisor: boolean) {
+    if (!hasHypervisor || vmsLoaded) return;
+    vmsLoaded = true;
+    // local VMs and cluster VMs fetched in parallel; cluster silently empty if not Proxmox
+    const [localRes, clusterRes] = await Promise.allSettled([
+      fetch('/api/vms'),
+      fetch('/api/vms/cluster'),
+    ]);
+    if (localRes.status === 'fulfilled' && localRes.value.ok)
+      vms = await localRes.value.json();
+    if (clusterRes.status === 'fulfilled' && clusterRes.value.ok)
+      clusterVMs = await clusterRes.value.json();
+  }
+
+  let hasHypervisor = $derived(info?.has_proxmox || info?.has_kvm);
+
+  $effect(() => {
+    if (hasHypervisor) loadVMs(true);
+  });
+
+  function vmStateCounts(list: VM[] | ClusterVM[]) {
+    let running = 0, stopped = 0;
+    for (const v of list) {
+      if (v.state === 'running') running++;
+      else stopped++;
+    }
+    return { running, stopped, total: list.length };
   }
 
   onMount(() => {
@@ -220,7 +257,80 @@
     {/if}
   {/if}
 
-  <!-- Row 4: Health checks + Security hardening -->
+  <!-- Row 4: VM summary (only on hypervisor hosts) -->
+  {#if hasHypervisor}
+    {@const local = vmStateCounts(vms)}
+    {@const isProxmox = info?.has_proxmox}
+    {@const hasCluster = clusterVMs.length > 0}
+    <div class="vm-summary-row">
+      <!-- Local VMs panel -->
+      <a class="vm-panel" href="#/vms">
+        <div class="vm-panel-header">
+          <span class="vm-panel-title">{isProxmox ? 'Proxmox VMs (this node)' : 'Virtual Machines'}</span>
+          <span class="vm-panel-link">View all →</span>
+        </div>
+        {#if !vmsLoaded}
+          <div class="vm-loading">Loading…</div>
+        {:else if !vms.length}
+          <div class="vm-empty">No VMs found</div>
+        {:else}
+          <div class="vm-counts">
+            <span class="vm-count running"><span class="vm-dot running"></span>{local.running} running</span>
+            <span class="vm-count stopped"><span class="vm-dot stopped"></span>{local.stopped} stopped</span>
+          </div>
+          <div class="vm-list">
+            {#each vms.slice(0, 8) as vm}
+              <div class="vm-row">
+                <span class="vm-dot {vm.state}"></span>
+                <span class="vm-name">{vm.name}</span>
+                {#if vm.memory_mb}
+                  <span class="vm-mem">{vm.memory_mb >= 1024 ? (vm.memory_mb/1024).toFixed(0)+'G' : vm.memory_mb+'M'}</span>
+                {/if}
+              </div>
+            {/each}
+            {#if vms.length > 8}
+              <div class="vm-more">+{vms.length - 8} more</div>
+            {/if}
+          </div>
+        {/if}
+      </a>
+
+      <!-- Proxmox cluster panel (only when pvesh returns data) -->
+      {#if isProxmox && hasCluster}
+        {@const clusterLocal  = clusterVMs.filter(v => v.local)}
+        {@const clusterRemote = clusterVMs.filter(v => !v.local)}
+        {@const clusterCounts = vmStateCounts(clusterVMs)}
+        <div class="vm-panel">
+          <div class="vm-panel-header">
+            <span class="vm-panel-title">Proxmox Cluster (all nodes)</span>
+            <span class="vm-counts-inline">
+              <span class="vm-count running"><span class="vm-dot running"></span>{clusterCounts.running}</span>
+              <span class="vm-count stopped"><span class="vm-dot stopped"></span>{clusterCounts.stopped}</span>
+            </span>
+          </div>
+          <!-- Group by node -->
+          {#each [...new Set(clusterVMs.map(v => v.node))] as node}
+            {@const nodeVMs = clusterVMs.filter(v => v.node === node)}
+            <div class="cluster-node-label">{node}{clusterLocal.length && node === clusterLocal[0]?.node ? ' (this node)' : ''}</div>
+            <div class="vm-list">
+              {#each nodeVMs.slice(0, 6) as vm}
+                <div class="vm-row">
+                  <span class="vm-dot {vm.state}"></span>
+                  <span class="vm-name">{vm.name || 'VM ' + vm.vmid}</span>
+                  <span class="vm-mem" style="color:var(--text-tertiary)">#{vm.vmid}</span>
+                </div>
+              {/each}
+              {#if nodeVMs.length > 6}
+                <div class="vm-more">+{nodeVMs.length - 6} more on this node</div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Row 5: Health checks + Security hardening -->
   <div class="health-row">
     <HealthChecks />
     <HardeningScore />
@@ -266,4 +376,110 @@
 
 .health-row { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 .perf-row { width: 100%; margin-top: 0.75rem; }
+
+/* VM summary row */
+.vm-summary-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.vm-panel {
+  flex: 1;
+  min-width: 220px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  padding: 0.75rem 1rem;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: border-color 0.12s;
+}
+a.vm-panel:hover { border-color: var(--accent); }
+.vm-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+.vm-panel-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+}
+.vm-panel-link {
+  font-size: 0.7rem;
+  color: var(--accent);
+}
+.vm-loading, .vm-empty {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+}
+.vm-counts {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.vm-counts-inline {
+  display: flex;
+  gap: 0.6rem;
+}
+.vm-count {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+}
+.vm-count.running { color: #4ade80; }
+.vm-count.stopped { color: var(--text-tertiary); }
+.vm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.vm-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+.vm-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.vm-dot.running   { background: #4ade80; box-shadow: 0 0 4px #4ade8088; }
+.vm-dot.stopped   { background: var(--text-tertiary); }
+.vm-dot.paused,
+.vm-dot.suspended { background: #facc15; }
+.vm-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.vm-mem {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+.vm-more {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  padding-top: 0.1rem;
+}
+.cluster-node-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0.5rem 0 0.2rem;
+}
 </style>
