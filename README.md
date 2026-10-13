@@ -166,28 +166,39 @@ Webux issues a real JWT session and redirects to the dashboard. The token can al
 ## Quick start
 
 ```bash
-# Build from source
-git clone https://github.com/brendan4linux/webux
-cd webux
-go mod tidy
-make build-full          # CGO enabled — supports all password hash types
-sudo WEBUX_DATA_DIR=/var/lib/webux ./build/webux-full
+# Download and run (installs binary + detects init system automatically)
+curl -fsSL https://github.com/brendan4linux/webux/releases/latest/download/install.sh | sudo sh
 
-# Open — login with your Linux username and password
-open https://localhost:8989
+# Or with a specific version
+sudo sh install.sh --version 1.1.3
+
+# Skip service setup (binary only)
+sudo sh install.sh --no-service
 ```
 
-### Install as a service
+The installer auto-detects:
+- CPU architecture (`uname -m`)
+- OS and package manager (`/etc/os-release`)
+- Init system (systemd → OpenRC → SysV)
+
+---
+
+## Package installation
 
 ```bash
-sudo make install        # installs binary + systemd unit
-sudo systemctl enable --now webux
-```
+# Debian / Ubuntu
+dpkg -i webux_1.0.0_amd64.deb
+# Service is enabled and started automatically via post-install hook
 
-### Development (no auth)
+# RHEL / Fedora / CentOS
+rpm -i webux-1.0.0-1.x86_64.rpm
 
-```bash
-sudo WEBUX_DATA_DIR=/tmp/webux-data ./build/webux-full --no-auth
+# Arch / Manjaro / CachyOS
+pacman -U webux-1.0.0-1-x86_64.pkg.tar.zst
+
+# Universal tarball
+tar xzf webux-1.0.0-linux-amd64.tar.gz
+sudo sh usr/local/share/webux/install.sh
 ```
 
 ---
@@ -379,46 +390,6 @@ Webux is a static binary — it runs on any Linux with kernel 3.10+.
 | Any SysV distro | any | SysV | Universal installer handles init |
 
 Cross-compiled architectures: **amd64, arm64, armv7, 386**
-
----
-
-## Universal installer
-
-```bash
-# Download and run (installs binary + detects init system automatically)
-curl -fsSL https://github.com/brendan4linux/webux/releases/latest/download/install.sh | sudo sh
-
-# Or with a specific version
-sudo sh install.sh --version 1.0.0
-
-# Skip service setup (binary only)
-sudo sh install.sh --no-service
-```
-
-The installer auto-detects:
-- CPU architecture (`uname -m`)
-- OS and package manager (`/etc/os-release`)
-- Init system (systemd → OpenRC → SysV)
-
----
-
-## Package installation
-
-```bash
-# Debian / Ubuntu
-dpkg -i webux_1.0.0_amd64.deb
-# Service is enabled and started automatically via post-install hook
-
-# RHEL / Fedora / CentOS
-rpm -i webux-1.0.0-1.x86_64.rpm
-
-# Arch / Manjaro / CachyOS
-pacman -U webux-1.0.0-1-x86_64.pkg.tar.zst
-
-# Universal tarball
-tar xzf webux-1.0.0-linux-amd64.tar.gz
-sudo sh usr/local/share/webux/install.sh
-```
 
 ---
 
