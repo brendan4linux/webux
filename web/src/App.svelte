@@ -7,6 +7,7 @@
   import Dashboard from './routes/Dashboard.svelte';
   import Ports from './routes/ports.svelte';
   import Migration from './routes/migration.svelte';
+  import ServiceMap from './routes/ServiceMap.svelte';
   import Services from './routes/Services.svelte';
   import Processes from './routes/Processes.svelte';
   import Users from './routes/Users.svelte';
@@ -55,6 +56,7 @@
     '#/':           Dashboard,
     '#/ports':      Ports,
     '#/migration':  Migration,
+    '#/servicemap': ServiceMap,
     '#/services':   Services,
     '#/processes':  Processes,
     '#/users':      Users,

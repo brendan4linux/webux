@@ -19,6 +19,7 @@
         { href: '#/ports', icon: '◎', label: 'Ports & Sockets' },
         { href: '#/network', icon: '⟁', label: 'Interfaces' },
         { href: '#/firewall', icon: '⬡', label: 'Firewall' },
+        { href: '#/servicemap', icon: '◎', label: 'Service Map' },
       ]
     },
     {

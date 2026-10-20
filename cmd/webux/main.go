@@ -22,6 +22,7 @@ import (
 	"github.com/brendan4linux/webux/internal/db"
 	"github.com/brendan4linux/webux/internal/system"
 	"github.com/brendan4linux/webux/internal/system/hardening"
+	"github.com/brendan4linux/webux/internal/system/servicemap"
 	webuxTLS "github.com/brendan4linux/webux/internal/tlsutil"
 	"github.com/brendan4linux/webux/internal/ws"
 )
@@ -84,6 +85,9 @@ func main() {
 			)
 		}
 	}()
+
+	// Start service map watcher — polls conntrack every 30s, writes to SQLite.
+	go servicemap.NewWatcher(database).Run()
 
 	// Ensure JWT secret exists — generate if missing
 	jwtSecret := cfg.Auth.JWTSecret

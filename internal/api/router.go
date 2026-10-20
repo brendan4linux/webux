@@ -286,6 +286,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		r.Get("/logs/systemd/units", logsH.Units)
 		r.Get("/logs/systemd/follow", logsH.FollowUnit)
 
+		// Service Map
+		smH := handlers.NewServiceMapHandler(cfg.DB, learnStore)
+		r.Get("/servicemap/snapshot", smH.Snapshot)
+		r.Get("/servicemap/connections", smH.ConnectionStats)
+		r.Get("/servicemap/topology", smH.Topology)
+
 		// Migration
 		migH := handlers.NewMigrationHandler(learnStore)
 		r.Get("/migration/snapshot", migH.Snapshot)
