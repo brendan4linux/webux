@@ -20,6 +20,10 @@ func NewWatcher(db *sql.DB) *Watcher {
 // Run starts the background polling loop. Call in a goroutine; it runs until
 // the process exits (no context plumbing to keep it simple).
 func (w *Watcher) Run() {
+	// Purge rows written by the old buggy attribution that used ephemeral source
+	// ports (always resulted in src_process = "(unknown)").
+	w.db.Exec(`DELETE FROM sm_connection_stats WHERE src_process = '(unknown)'`)
+
 	// First tick immediately so data is available on first page load.
 	w.tick()
 
@@ -31,41 +35,29 @@ func (w *Watcher) Run() {
 }
 
 func (w *Watcher) tick() {
-	entries, ok := readConntrack()
+	// Gate on conntrack availability — if it's missing, skip the whole tick.
+	_, ok := readConntrack()
 	if !ok {
-		return // conntrack not available on this kernel
+		return
 	}
 
-	// Build inode→PID map for process attribution (best-effort; errors ignored)
+	// Capture() already correctly attributes ESTABLISHED outbound connections
+	// to their owning process via the inode→PID map. Use that directly rather
+	// than trying to re-attribute raw conntrack entries by ephemeral src port
+	// (which never matches the listening-port-keyed map).
 	snapshot, err := Capture()
 	if err != nil {
 		slog.Debug("servicemap watcher: capture failed", "err", err)
 		return
 	}
 
-	// Build a quick port→processName map from the snapshot
-	portToProcess := map[int]string{}
 	for _, svc := range snapshot.Services {
-		portToProcess[svc.Port] = svc.Name
-	}
-
-	for _, e := range entries {
-		// Skip loopback and non-outbound entries
-		if e.DstIP == "127.0.0.1" || e.DstIP == "::1" {
-			continue
+		for _, ob := range svc.Outbound {
+			if ob.DstIP == "127.0.0.1" || ob.DstIP == "::1" {
+				continue
+			}
+			w.upsert(svc.Name, ob.DstIP, ob.DstPort, ob.Protocol, ob.ServiceHint)
 		}
-		// Skip internal-only (both src and dst are local) — we only want outbound
-		if isPrivate(e.SrcIP) && isPrivate(e.DstIP) {
-			// Still track internal service-to-service calls
-		}
-
-		srcProcess := portToProcess[e.SrcPort]
-		if srcProcess == "" {
-			srcProcess = "(unknown)"
-		}
-		hint := portServiceHint(e.DstPort)
-
-		w.upsert(srcProcess, e.DstIP, e.DstPort, e.Protocol, hint)
 	}
 }
 
