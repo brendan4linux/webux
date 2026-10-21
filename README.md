@@ -63,6 +63,16 @@ One binary. No agents. No containers. Works on any distro.
       <sub><b>Migration Template</b> — full server snapshot export</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/servicemap_services.png" alt="Service Map — Services" width="480"><br>
+      <sub><b>Service Map</b> — live fingerprinted services with process details</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/servicemap_topology.png" alt="Service Map — Topology" width="480"><br>
+      <sub><b>Service Map Topology</b> — outbound connection graph from conntrack</sub>
+    </td>
+  </tr>
 </table>
 
 ---
@@ -95,6 +105,7 @@ It is opinionated about being lightweight: no Docker required to run it, no syst
 | **Ports & Sockets** | Reads `/proc/net/tcp*`, `/proc/net/udp*` directly — no `ss` or `netstat` needed. Cross-references `/proc/<pid>/fd` to show owning process. Enriches with systemd socket unit names |
 | **Interfaces** | Network interface list with live bandwidth sparklines (SSE streaming) |
 | **Firewall** | ufw, nftables, and iptables rule viewer and management |
+| **Service Map** | Live service fingerprinting from `/proc/net/tcp*` and `/proc/<pid>/fd`. Identifies process name, user, binary path, and known service type (nginx, postgres, redis, etc.) for every listening port. **Connections** tab shows historical outbound connection stats accumulated from `nf_conntrack`. **Topology** view renders a live graph of local services and the remote hosts they talk to |
 
 ### Applications
 | Feature | Description |
