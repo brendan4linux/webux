@@ -35,16 +35,8 @@ func (w *Watcher) Run() {
 }
 
 func (w *Watcher) tick() {
-	// Gate on conntrack availability — if it's missing, skip the whole tick.
-	_, ok := readConntrack()
-	if !ok {
-		return
-	}
-
-	// Capture() already correctly attributes ESTABLISHED outbound connections
-	// to their owning process via the inode→PID map. Use that directly rather
-	// than trying to re-attribute raw conntrack entries by ephemeral src port
-	// (which never matches the listening-port-keyed map).
+	// Outbound connection data comes from /proc/net/tcp via Capture() — no
+	// conntrack needed. ConntrackOK in the snapshot is only used for UI display.
 	snapshot, err := Capture()
 	if err != nil {
 		slog.Debug("servicemap watcher: capture failed", "err", err)
