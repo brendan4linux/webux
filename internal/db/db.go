@@ -42,9 +42,15 @@ var migration010 string
 //go:embed migrations/011_servicemap.sql
 var migration011 string
 
+//go:embed migrations/012_repair_servicemap.sql
+var migration012 string
+
 // Open opens (or creates) the Webux SQLite database.
 func Open(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_journal=WAL&_timeout=5000&_fk=true")
+	// ncruces/go-sqlite3 requires the file: URI scheme for query parameters;
+	// without it the driver treats "path?params" as a literal filename.
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)"
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -76,6 +82,7 @@ func Migrate(db *sql.DB) error {
 		{9, migration009},
 		{10, migration010},
 		{11, migration011},
+		{12, migration012},
 	}
 
 	for _, m := range migrations {
