@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import HealthChecks from '$components/HealthChecks.svelte';
   import HardeningScore from '$components/HardeningScore.svelte';
+  import PerformanceScore from '$components/PerformanceScore.svelte';
 
   let hostname    = $state('');
   let distro      = $state('');
@@ -219,10 +220,11 @@
     {/if}
   {/if}
 
-  <!-- Row 4: Health checks + Security hardening -->
+  <!-- Row 4: Health checks + Security hardening + Performance -->
   <div class="health-row">
     <HealthChecks />
     <HardeningScore />
+    <PerformanceScore />
   </div>
 </div>
 
@@ -258,5 +260,5 @@
 .cap-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 4px var(--accent); flex-shrink: 0; }
 .cap-inactive .cap-dot { background: var(--text-tertiary); box-shadow: none; }
 
-.health-row { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.health-row { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
 </style>
